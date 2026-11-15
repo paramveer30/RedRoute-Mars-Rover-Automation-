@@ -1,8 +1,15 @@
 ﻿"""Belief-only terrain cost and clearance masks for PRD section 7.3.
 
-C = max(1, 1 + w_s*S + w_r*R + w_u*U). Semantic noise filtering
-applies only to big-rock predictions; terrain slopes and sensed geometry
-remain hard obstacles even when they occupy a single cell.
+C = max(1, 1 + w_s*S + w_r*R + w_u*U). With semantics on, known cells
+whose belief P(big rock) > p_big_rock_block or P(sand) >= P_SAND_BLOCK are
+hard obstacles; sand below the threshold keeps only its soft risk term.
+Blocked sand is inflated by SAND_INFLATE_M (the rover body radius) instead
+of cfg.inflate_m: with 1.5 m around every sand blob, a perfect-knowledge map
+joined start and goal in only 4 of the first 20 eval scenarios (19 of 20 at
+0.5 m), because AI4Mars terrain is about a quarter sand.
+Semantic noise filtering (min_blob_cells) applies to each semantic class
+separately; terrain slopes and sensed geometry remain hard obstacles even
+when they occupy a single cell.
 """
 from __future__ import annotations
 
@@ -11,7 +18,15 @@ from functools import lru_cache
 import numpy as np
 from scipy import ndimage
 
-from .contracts import BIG_ROCK, RES_M, Belief, Cell, CostConfig, World
+from .contracts import BIG_ROCK, RES_M, SAND, Belief, Cell, CostConfig, World
+
+# Belief P(sand) at or above which a known cell is blocked. Reuses the big-rock
+# threshold so CostConfig (shared contract) needs no new field.
+P_SAND_BLOCK = CostConfig().p_big_rock_block
+# Clearance around blocked sand: the rover footprint radius (0.5 m = 2 cells),
+# so an unblocked cell's footprint never overlaps predicted sand. Capped by
+# cfg.inflate_m so inflate_m=0 still disables all inflation.
+SAND_INFLATE_M = 0.5
 
 
 @lru_cache(maxsize=32)
@@ -41,18 +56,26 @@ def _cost_terms(world: World, belief: Belief, cfg: CostConfig
     return semantic, world.roughness, uncertainty
 
 
+def _drop_small_blobs(mask: np.ndarray, min_cells: int) -> np.ndarray:
+    if min_cells <= 1 or not mask.any():
+        return mask
+    labels, _ = ndimage.label(mask)
+    keep = np.bincount(labels.ravel()) >= min_cells
+    keep[0] = False
+    return keep[labels]
+
+
 def _block_sources(world: World, belief: Belief, cfg: CostConfig
-                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    semantic = np.zeros_like(belief.known)
+                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Raw (pre-inflation) blocks: slope, big rock, sand, sensed geometry."""
+    rock = np.zeros_like(belief.known)
+    sand = np.zeros_like(belief.known)
     if cfg.use_semantics:
-        semantic = belief.known & (belief.probs[..., BIG_ROCK] > cfg.p_big_rock_block)
-        if cfg.min_blob_cells > 1 and semantic.any():
-            labels, _ = ndimage.label(semantic)
-            sizes = np.bincount(labels.ravel())
-            keep = sizes >= cfg.min_blob_cells
-            keep[0] = False
-            semantic = keep[labels]
-    return world.slope_deg > cfg.max_slope_deg, semantic, belief.geo_seen
+        rock = _drop_small_blobs(belief.known & (belief.probs[..., BIG_ROCK] > cfg.p_big_rock_block),
+                                 cfg.min_blob_cells)
+        sand = _drop_small_blobs(belief.known & (belief.probs[..., SAND] >= P_SAND_BLOCK),
+                                 cfg.min_blob_cells)
+    return world.slope_deg > cfg.max_slope_deg, rock, sand, belief.geo_seen
 
 
 def cost_grid(world: World, belief: Belief, cfg: CostConfig | None = None
@@ -67,11 +90,18 @@ def cost_grid(world: World, belief: Belief, cfg: CostConfig | None = None
     cost = (1.0 + cfg.w_s * semantic + cfg.w_r * roughness + cfg.w_u * uncertainty).astype(np.float32)
     np.maximum(cost, 1.0, out=cost)
 
-    slope_block, semantic_block, geo_block = _block_sources(world, belief, cfg)
-    raw = slope_block | semantic_block | geo_block
-    disk = _inflation_disk(int(round(cfg.inflate_m / RES_M)))
-    blocked = ndimage.binary_dilation(raw, structure=disk) if raw.any() and disk.size > 1 else raw
+    slope_block, rock_block, sand_block, geo_block = _block_sources(world, belief, cfg)
+    blocked = _inflate(slope_block | rock_block | geo_block, cfg.inflate_m)
+    blocked |= _inflate(sand_block, min(cfg.inflate_m, SAND_INFLATE_M))
     return cost, blocked
+
+
+def _inflate(raw: np.ndarray, radius_m: float) -> np.ndarray:
+    disk = _inflation_disk(int(round(radius_m / RES_M)))
+    return ndimage.binary_dilation(raw, structure=disk) if raw.any() and disk.size > 1 else raw
+
+
+_REASONS = ("slope", "big_rock", "predicted sand", "geo_obstacle")
 
 
 def explain_cell(world: World, belief: Belief, cfg: CostConfig, cell: Cell) -> dict:
@@ -87,7 +117,7 @@ def explain_cell(world: World, belief: Belief, cfg: CostConfig, cell: Cell) -> d
     semantic, roughness, uncertainty = _cost_terms(world, belief, cfg)
     costs, blocked = cost_grid(world, belief, cfg)
     source_masks = _block_sources(world, belief, cfg)
-    reasons = [name for name, mask in zip(("slope", "big_rock", "geo_obstacle"), source_masks) if mask[cell]]
+    reasons = [name for name, mask in zip(_REASONS, source_masks) if mask[cell]]
     if blocked[cell] and not reasons:
         reasons.append("inflation")
     return {
@@ -99,4 +129,5 @@ def explain_cell(world: World, belief: Belief, cfg: CostConfig, cell: Cell) -> d
         "known": bool(belief.known[cell]),
         "blocked": bool(blocked[cell]),
         "blocked_reason": ", ".join(reasons) if reasons else None,
+        "blocked_label": f"blocked: {', '.join(reasons)}" if reasons else None,
     }

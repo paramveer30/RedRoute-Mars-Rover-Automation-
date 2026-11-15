@@ -225,3 +225,66 @@ def test_cost_grid_under_fifteen_ms(scene):
     median, p95 = np.percentile(timings, [50, 95])
     print(f"cost_grid 200x200: median={median:.3f} ms p95={p95:.3f} ms (25 samples)")
     assert median < 15, f"median cost_grid latency {median:.3f} ms >= 15 ms"
+
+
+def test_likely_sand_blob_is_blocked_and_inflated(scene):
+    world, belief, cfg = scene
+    belief.known.fill(True)
+    belief.probs[100:102, 100:102] = [0.3, 0, 0.6, 0.1]
+    _, raw = cost_grid(world, belief, replace(cfg, inflate_m=0))
+    assert raw[100:102, 100:102].all()
+    assert raw.sum() == 4
+    _, blocked = cost_grid(world, belief, cfg)
+    assert blocked[100, 98] and blocked[100, 103]   # 2-cell (0.5 m footprint) inflation
+    assert not blocked[100, 97] and not blocked[100, 104]
+    terms = explain_cell(world, belief, cfg, (100, 100))
+    assert terms["blocked_reason"] == "predicted sand"
+    assert terms["blocked_label"] == "blocked: predicted sand"
+    assert explain_cell(world, belief, cfg, (100, 98))["blocked_reason"] == "inflation"
+    assert not explain_cell(world, belief, cfg, (100, 96))["blocked"]
+
+
+def test_sand_inflation_matches_footprint_and_rock_keeps_full_clearance(scene):
+    world, belief, cfg = scene
+    belief.known.fill(True)
+    belief.probs[100, 100:102] = belief.probs[101, 100:102] = [0, 0, 1, 0]
+    belief.probs[50:52, 50:52] = [0, 0, 0, 1]
+    _, blocked = cost_grid(world, belief, cfg)
+    yy, xx = np.ogrid[:GRID, :GRID]
+    sand = np.zeros((GRID, GRID), bool)
+    for r, c in [(100, 100), (100, 101), (101, 100), (101, 101)]:
+        sand |= (yy - r)**2 + (xx - c)**2 <= 2**2
+    np.testing.assert_array_equal(blocked[80:120, 80:120], sand[80:120, 80:120])
+    assert blocked[50, 44] and not blocked[50, 43]       # big rock still 6 cells
+
+
+def test_sand_threshold_is_inclusive_and_isolated_sand_is_noise(scene):
+    world, belief, cfg = scene
+    belief.known.fill(True)
+    belief.probs[50:52, 50:52] = [0.5, 0, 0.5, 0]       # exactly at threshold
+    belief.probs[150, 150] = [0, 0, 1, 0]               # single cell: filtered as noise
+    _, blocked = cost_grid(world, belief, replace(cfg, inflate_m=0))
+    assert blocked[50:52, 50:52].all()
+    assert blocked.sum() == 4
+
+
+def test_sub_threshold_sand_is_soft_cost_only(scene):
+    world, belief, cfg = scene
+    belief.known.fill(True)
+    belief.unc.fill(0)
+    belief.probs[90:110, 90:110] = [0.55, 0, 0.45, 0]
+    costs, blocked = cost_grid(world, belief, cfg)
+    assert not blocked.any()
+    np.testing.assert_allclose(costs[100, 100], 1 + cfg.w_s * (0.55 * 0.2 + 0.45 * 1.0), rtol=1e-6)
+    assert explain_cell(world, belief, cfg, (100, 100))["blocked_reason"] is None
+
+
+def test_unknown_or_geometry_only_sand_never_blocks(scene):
+    world, belief, cfg = scene
+    belief.probs[:] = [0, 0, 1, 0]
+    _, blocked = cost_grid(world, belief, cfg)          # nothing known yet
+    assert not blocked.any()
+    belief.known.fill(True)
+    costs, blocked = cost_grid(world, belief, replace(cfg, use_semantics=False))
+    assert not blocked.any()
+    np.testing.assert_array_equal(costs, 1)

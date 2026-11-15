@@ -38,9 +38,9 @@ work at the human checkpoints in section 5.
 
 | Task | Status | Published commits |
 | --- | --- | --- |
-| A01 | Model and trainer published; smoke passed; full training running | `18b581b`, `a64cf3d` |
+| A01 | Complete; trained weights published | `18b581b`, `a64cf3d`, `7d05496` |
 | A02 | Complete | `e4b5ae6` |
-| A03 | Complete; human visual review pending | `134e9ff`, `4318808` |
+| A03 | Complete; human visual review approved | `134e9ff`, `4318808` |
 | A08 | Complete | `9a22dc8` |
 
 ### A01: training
@@ -52,14 +52,19 @@ work at the human checkpoints in section 5.
 - Default full training started with 20 requested epochs, batch 16,
   input size 256, and the fixed 500-row validation split. No test set is
   used for training or checkpoint selection.
-- Full-run final validation metrics and deployable weights are pending.
-  Do not use the smoke export as the trained deliverable.
-- Training process launched hidden with PID `43164`. Process existence
-  alone does not prove success: inspect the logs and final summary.
+- Full training completed 20 epochs in 1,400.396 seconds (23.34 minutes).
+  Training loss fell from 0.855600 to 0.117096.
+- Selected checkpoint: epoch 16, validation mIoU 0.795561; per-class IoU
+  soil 0.923963, bedrock 0.937332, sand 0.874320, big rock 0.446628.
+  These use 256 px validation labels; A05's native-resolution evaluation
+  has a different measurement procedure.
+- Class weights: [1.651625, 1.406552, 2.897715, 10.625541].
+- Deployable weights: 49,007,035 bytes. Final offline fp32 CPU execution
+  passed; weights were pushed after rebasing and 44 passing tests.
+- Training process PID `43164` exited successfully; GPU released.
 - Logs: `C:/Pranoy/Machacks/rr-artifacts/runs/train/stdout.log`,
-  `stderr.log`, and `log.csv`; successful completion writes `summary.json`.
-- Retain `C:/Pranoy/Machacks/wt/A01` until training, final verification,
-  and the final weights push are complete.
+  `stderr.log`, `log.csv`, and `summary.json`.
+- Completed A01 worktree removed after the final weights push.
 
 ### A02: real terrain
 
@@ -113,3 +118,20 @@ work at the human checkpoints in section 5.
   human-reviewed retraining decision. A05 follows completed A01 weights.
 - Gate G3: with Stream B, switch to model mode and verify that predictions
   change the route. Later checkpoints remain as listed in section 5.
+
+## Resumed execution after warp approval
+
+The human explicitly approved the warps and requested continuation of the
+plan. A04 and A07 were launched in separate detached worktrees. A05 follows
+completed A01 on the GPU; A06 waits for A05 to release it. The remaining
+sequence is A07 live inference, A11 frame assets, and optional A10
+calibration, with the section 5 checkpoints retained.
+
+The shared contract remains unchanged unless both humans approve a change.
+A07 can maintain internal fusion weights without modifying `Belief`.
+
+At resumption, Stream B's `planner.plan()` still raises
+`NotImplementedError`, and `Rover` is not implemented. Actual G3 route-change
+verification and A09 mission results depend on those implementations. A09
+metric code and synthetic tests may be prepared early as its brief permits;
+synthetic results must never be presented as measured rover performance.

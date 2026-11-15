@@ -4,6 +4,7 @@ Mission control plus an onboard autonomy stack. It drives a simulated Perseveran
 
 - **Stream A plan (perception, world, eval):** [docs/STREAM_A.md](docs/STREAM_A.md)
 - **Stream B plan (autonomy, reliability, mission control):** [docs/STREAM_B.md](docs/STREAM_B.md)
+- **Stream A agent task briefs:** [docs/stream_a/tasks/](docs/stream_a/tasks/)
 - **Shared contract:** [backend/app/contracts.py](backend/app/contracts.py). Change it only together.
 
 ## Setup
@@ -52,7 +53,9 @@ backend/app/
   faults.py      B   fault injection
   api.py         B   REST + WebSocket
 frontend/  Stream B  (A owns the 3D view and vision-panel components)
-terrain/   jezero_crop.tif, light_delay.json (committed); tiles/, preds/ (generated, gitignored)
+terrain/   jezero_crop.tif, light_delay.json, frames/, overlays/ (committed)
+artifacts/ big/regenerable outputs, gitignored; location set by $RR_ARTIFACTS (world/paths.py)
+AGENTS.md  rules for coding agents (main only, no AI attribution, file ownership)
 ```
 
 ## Data sources

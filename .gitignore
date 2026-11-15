@@ -15,11 +15,10 @@ frontend/dist/
 *.ckpt
 *.sqlite
 *.db
-terrain/preds/*.npy
-terrain/tiles/*
-!terrain/tiles/.gitkeep
+artifacts/
 ml/runs/
 ml/checkpoints/
+!ml/weights/*.pt
 data/
 *.zip
 

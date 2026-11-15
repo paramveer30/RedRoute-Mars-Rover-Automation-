@@ -1,147 +1,142 @@
-# Stream A: Perception, World, and Evaluation
+# Stream A: Perception, World, and Evaluation (orchestration playbook)
 
-**You own:** everything that turns real NASA data into the rover's picture of the world, and the numbers that prove it works.
+**Owner:** Pranoy (human), working with an orchestrator agent (Codex) that spawns subagents, one git worktree each.
 
-**Your files:** `ml/`, `world/`, `eval/`, `backend/app/perception.py`, `backend/app/mapping.py`, plus the 3D view and vision-panel components in `frontend/src/` (P1).
+**Stream A owns:** everything that turns real NASA data into the rover's picture of the world, plus the numbers that prove it works.
+Files: `ml/`, `world/`, `eval/`, `backend/app/perception.py`, `backend/app/mapping.py`, Stream A tests in `backend/tests/`, `frontend/src/Terrain3D.tsx`.
+**Never edit without Stream B agreeing:** `backend/app/contracts.py`. Stream B owns `planner.py`, `rover.py`, `link.py`, `faults.py`, `api.py` and the rest of `frontend/`.
 
-**Do not edit without Stream B:** `backend/app/contracts.py`. Stream B owns `planner.py`, `rover.py`, `link.py`, `faults.py`, `api.py`.
-
-**Git:** everyone works directly on `main`, no branches. Pull before you start, commit small, push often. Stick to your own files to avoid conflicts.
-
----
-
-## What already exists (from setup)
-
-| File | State |
-|---|---|
-| `backend/app/contracts.py` | `World`, `Belief`, `Pose`, `CostConfig`, `SensorConfig`, `ObserveFlags`, `ObserveResult`, grid constants |
-| `backend/app/perception.py` | `observe()` with **oracle mode** working (sensor cone, geometric channel, drop and corrupt flags). `mode="model"` raises `NotImplementedError`: that's yours |
-| `backend/app/mapping.py` | `cost_grid()` reference implementation of PRD 7.3, including blob filtering before inflation. Tune and test it |
-| `world/stub_world.py` | Synthetic world that Stream B uses until your real `build_world()` lands |
-| `world/crop_dtm.py` | Crops the Jezero DTM over HTTP (no 1.8 GB download) and prints slope stats |
-| `ml/check_dataset.py` | Loads AI4Mars `test_min3` and streams training rows |
-| `backend/tests/test_contracts.py` | Shape and cone tests. Keep them green |
-
-Run the tests with `.venv/Scripts/python -m pytest` from the repo root.
+Task briefs live in [`docs/stream_a/tasks/`](stream_a/tasks/). Each one is self-contained: hand it to a subagent unchanged. Repo-wide agent rules: [`AGENTS.md`](../AGENTS.md).
 
 ---
 
-## Hour-by-hour
+## 1. Rules for the orchestrator
 
-### Hour 0 to 1: contract and start training
-- [ ] 30 min contract meeting with B. Read `contracts.py` together and change anything now, not later.
-- [x] Dataset verified in setup (`python ml/check_dataset.py`). What it showed:
-  - Columns: `image`, `label_mask`, `rover_mask`, `range_mask`, `has_masks`, `has_labels`. Every array is **1024 × 1024 uint8**.
-  - **Some training rows have `has_labels=False` and `label_mask=None`. Filter them out** or training crashes.
-  - **There is no image-id column.** Use the `test_min3` row index as the id (`"m3_0042"`), which is what `World.tile_image` stores.
-  - On Windows, the HF stream sometimes throws `WinError 10038` and retries itself. If streaming is flaky, download the split once with `load_dataset(..., split="train[:6000]")`.
-- [ ] Write `ml/train.py` and start it **in the background**:
-  - `smp.Unet("resnet34", encoder_weights="imagenet", classes=4)`
-  - Grayscale to 3 channels, **256 px** first (go to 512 only if time allows)
-  - Ignore label 255. Also set to 255 any pixel where `rover_mask` is on or `range_mask` marks beyond 30 m
-  - Loss = weighted CE (`ignore_index=255`) + Dice. Starting weights: soil 1, bedrock 1, sand 2, **big rock 10 to 20**
-  - About 6000 streamed training rows; hold out about 500 as **validation** (you need these later for temperature scaling, so never tune on `test_min3`)
-  - AdamW, lr 3e-4, mixed precision, batch 16 at 256 px fits in 8 GB
-  - Save `ml/checkpoints/unet_best.pt` (gitignored) by val mIoU, and log loss and mIoU per epoch
-- **Done:** loss goes down in the log.
+1. **Main only, no branches.** Worktrees are created **detached** (`--detach`). Subagents push with `git push origin HEAD:main`. Never create a named branch, never push one.
+2. **No AI attribution.** No `Co-Authored-By` or "Generated with" lines in commits. Only the human appears as author.
+3. **One task = one subagent = one worktree.** A subagent edits only the files its brief lists under "You own". If it needs another file changed, it stops and reports.
+4. **`contracts.py` changes need the human's OK** (who checks with Stream B). A07 proposes one (a `Belief.weight` field), so escalate it rather than pushing it.
+5. **One GPU job at a time.** Tasks tagged `[GPU]` (A01, A05, A06) never overlap. While A01 trains, A05/A06 wait.
+6. **Tests green before every push:** `$PY -m pytest -q` in the worktree after rebasing on `origin/main`.
+7. **Honest numbers only.** Results, metrics and ECE are whatever the code measured. A disappointing number gets reported, never massaged.
+8. Commit message format: `A03: ground-plane warp and tile library`.
 
-> **GPU:** this laptop has an RTX 5060 (8 GB, CUDA 12.8 build installed), so you can train locally. Kaggle is the backup.
+## 2. Environment (every worktree)
 
-### Hour 1 to 3: terrain grids from the real DTM
-- [x] **DTM crop already done in setup:** `terrain/jezero_crop.tif` (58 × 58 at 1 m including 4 m padding each side) at **18.43910°N, 77.40880°E**. It's a drivable plateau (median slope 4.5°) with the steep delta-front scarp along the east edge (about 11% of the 50 m patch is over 20°, 16 m relief). The landing site was tested and rejected: only 1 m of relief and a 4° maximum slope, so the slope constraint would never fire. Re-crop with `world/crop_dtm.py --lat .. --lon ..` if you want another spot.
-- [ ] `world/terrain.py`: load the crop, trim the padding to exactly 50 m.
-  - **elevation:** bilinear upsample from 1 m to 0.25 m, giving (200, 200).
-  - **slope:** `np.degrees(np.arctan(np.hypot(*np.gradient(z, 0.25))))` on the upsampled grid.
-  - **roughness: compute at native 1 m, not 0.25 m.** A bilinear upsample is locally planar, so a 3×3 plane fit on it leaves almost zero residual. Use the plane-fit residual std over 3×3 or 5×5 at 1 m, then upsample and normalize to 0..1 with a fixed percentile clip (p99) so values compare across seeds.
-  - Save `world/terrain.npz` and a matplotlib PNG of slope and roughness for a sanity check (and later for the slides).
-- **Done:** heatmaps look like real terrain, not noise and not flat.
+```bash
+# Shared Python env (lives in the main checkout; worktrees reuse it, no extra venvs)
+PY=C:/Pranoy/Machacks/RedRoute-Mars-Rover-Automation-/.venv/Scripts/python.exe
+# Shared artifacts dir. Worktrees do NOT share gitignored files, so all big outputs go here
+RR_ARTIFACTS=C:/Pranoy/Machacks/rr-artifacts        # set as a Windows user env var
+```
+- The Hugging Face cache (`~/.cache/huggingface`) is shared automatically; `test_min3` is already cached.
+- `world/paths.py` is the only place paths are defined. `ml/ai4mars.py` is the only dataset loader. Both exist already.
+- Run Python from the worktree root (pytest uses `pythonpath = .`).
 
-### Hour 3 to 6: tile warping and world builder
-- [ ] `world/warp.py`: one fixed ground-plane homography (inverse perspective mapping).
-  - Pick 4 source points on an image's near field (a trapezoid about 2 to 10 m ahead) and map them to a 5 m × 5 m top-down square of 20 × 20 cells (warp at a higher resolution, for example 160 × 160 px, for the camera overlay, then downsample to 20 × 20 for the grid).
-  - Tune the trapezoid by eye on 5 to 10 images. Use `range_mask` to stay inside the labelled near field.
-  - Warp the label with `INTER_NEAREST` and images or probabilities with `INTER_LINEAR`. **Use the same matrix for everything.**
-  - Drop images where the warped label is more than 40% 255. Expect to lose a fair share. Save the list of usable ids.
-- [ ] Cache warped data to `terrain/tiles/<id>.npz` (`label20`, `image160`, gitignored, regenerable).
-- [ ] `world/builder.py::build_world(seed) -> World`:
-  - Seeded RNG picks 100 usable ids into the 10 × 10 grid (sample with replacement if fewer than 100 survive)
-  - `truth` = the warped labels stitched together; elevation, slope and roughness from `terrain.npz`; `geo_obstacle` all False
-  - Optional: bias tile choice so sand and rock tiles appear near the straight-line route, which makes demo seeds interesting
-- [ ] Pick 2 or 3 **demo seeds** where the straight route crosses sand. Write them in `world/DEMO_SEEDS.md`.
-- **HANDOFF at hour 6:** tell B "swap `build_stub_world` for `build_world`". The signature and return type are identical.
+## 3. Worktree lifecycle
 
-### Hour 6 to 9: evaluate and precompute
-- [ ] `ml/evaluate.py` on **`test_min3`**: mIoU, per-class IoU (report big rock separately), confusion matrix, CPU latency per frame at your input size. Save `eval/seg_metrics.json`.
-- [ ] If big-rock IoU is poor: raise its weight and retrain in the background. Either way, report it honestly. The geometric channel is the safety backup.
-- [ ] `ml/precompute.py`: softmax probabilities for all 322 images, warped with the same homography, saved to `terrain/preds/<id>.npy` as (20, 20, 4) float16, plus logits for calibration.
-- **Done:** metrics table saved, preds cached.
+```bash
+MAIN=C:/Pranoy/Machacks/RedRoute-Mars-Rover-Automation-
+# spawn
+git -C $MAIN fetch origin
+git -C $MAIN worktree add --detach C:/Pranoy/Machacks/wt/A03 origin/main
+# ...subagent works inside C:/Pranoy/Machacks/wt/A03...
+# finish (run by the subagent)
+git add <owned files only>
+git commit -m "A03: ground-plane warp and tile library"
+git fetch origin && git rebase origin/main && $PY -m pytest -q && git push origin HEAD:main
+#   push rejected (someone pushed first)? -> fetch, rebase, test, push again
+# cleanup (orchestrator)
+git -C $MAIN worktree remove C:/Pranoy/Machacks/wt/A03
+git -C $MAIN pull --rebase
+```
+Long-running tasks (A01 training) can push code early (`ml/model.py` first) and keep their worktree alive while training runs.
 
-### Hour 9 to 12: `observe()` model mode and `cost_grid()`
-- [ ] `perception.py` `mode == "model"`:
-  - For each tile in the sensor cone, load the cached `(20,20,4)` probabilities and write them into the cone cells of that tile.
-  - **Fusion:** keep a per-cell weight sum. New `p = (w_old*p_old + w_new*p_new) / (w_old + w_new)` with `w_new = 1 - U_new`.
-  - `U = -Σ p ln p / ln 4` after fusion.
-  - **`flags.blur > 0` must run the model LIVE** on a Gaussian-blurred or noised version of the source image (the cache can't show uncertainty rising). Keep the model loaded once in a module-level singleton on CPU. Report `latency_ms`.
-  - `mode == "geometry_only"` or `"offline"`: mark known, no semantics (already stubbed).
-  - Set `frame_image_id` so B's camera panel shows the real NAVCAM frame.
-- [ ] `mapping.py`: tests for the hard constraints (slope, big rock, geo obstacle), inflation radius (6 cells), blob filter, the `use_semantics=False` path, and `cost >= 1` everywhere (A*'s heuristic depends on it).
-- [ ] Watch for this: if noisy big-rock pixels plus a 6-cell inflation block huge areas and the rover keeps SAFE_STOPping, raise `min_blob_cells` or apply a morphological opening first.
-- **Done:** unit tests pass; B's planner runs on your real belief.
+## 4. Task graph
 
-### Hour 12: INTEGRATION 1, gate G3 (most important milestone)
-- [ ] Switch the default mode from `"oracle"` to `"model"`. The ORACLE banner disappears.
-- [ ] Both of you watch a demo seed: the **route changes because of model output** (detours around predicted sand).
-- Don't move on until this works.
-
-### Hour 12 to 16: evaluation harness
-- [ ] `eval/harness.py`: headless missions, no FastAPI. It needs B's `Rover` class to step without the server. Agree on `Rover(world, mode, cfg).run_to_completion(start, goal, max_steps)` with B at hour 12.
-- [ ] Planners to compare:
-
-  | Name | Setting |
-  |---|---|
-  | Geometry-only | `CostConfig(use_semantics=False)` |
-  | RedRoute without U | `CostConfig(w_u=0)` |
-  | RedRoute | default |
-  | Oracle | `mode="oracle"` |
-
-- [ ] Metrics per mission: success (within 1 m, no hazard entry), hazard entries (rover footprint on truth sand, big rock, or slope over the limit), route length ratio, replanning latency, steps.
-- [ ] `multiprocessing.Pool` with an **`if __name__ == "__main__":` guard** (Windows uses spawn). Load the model once per worker in the pool `initializer`, not once per mission. Batch frames where you can.
-- [ ] Record **throughput**: missions/min, frames/s.
-- [ ] Save `eval/results.json` and a markdown table. B exposes it at `GET /api/eval/results`.
-- **Done:** a real results table. Fill the slide only with measured numbers.
-
-### Hour 16: P0 freeze
-Every P0 feature works end to end. Nothing new until then.
-
-### Hour 16 to 19: calibration and decision card (P1)
-- [ ] Temperature scaling: fit a single T on your **validation** split (LBFGS on NLL). Report ECE before and after (15 bins). Apply T inside `observe()`.
-- [ ] Route decision card data: `{chosen_len_m, shortest_len_m, hazard_avoided: "sand", mean_conf_on_avoided, extra_m}`. Agree on the field names with B, who draws it.
-- [ ] Overlay PNGs for the camera panel: the NAVCAM frame with the class-colour mask at 40% alpha, served from `terrain/overlays/<id>.png`.
-
-### Hour 19 to 21: 3D view (P1, cut first if behind)
-- [ ] `frontend/src/Terrain3D.tsx` with React Three Fiber: a `PlaneGeometry(50, 50, 199, 199)`, vertex z from `/api/world/{seed}` elevation (exaggerate it about 3×), vertex colours from belief classes, rover mesh, path as a `Line` from drei.
-
-### Hour 21 to 24: slides and rehearsal
-- [ ] Slides: data sources (AI4Mars, USGS DTM, Horizons), architecture, segmentation metrics, results table vs baselines, throughput.
-- [ ] **Honesty notes on a slide:** the Curiosity NAVCAM vs Perseverance mismatch, the flat-ground homography, and that the geometric obstacles are simulated.
-- [ ] Rehearse with B three times.
-
----
-
-## Cut order if behind
-Multi-rover (B's), Horizons (B's), then **3D view**, then **calibration**. Never cut G3 or the harness.
-
-## Interfaces you promise to B
-
-```python
-build_world(seed: int) -> World                                  # hour 6
-observe(world, belief, pose, sensor, flags, mode) -> ObserveResult  # oracle now, model at hour 12
-cost_grid(world, belief, cfg) -> (cost float32 >= 1, blocked bool)  # now (reference version)
-GET-able files: eval/results.json, eval/seg_metrics.json, terrain/overlays/<id>.png
+```
+Wave 1 (t=0, parallel)        Wave 2 (~h3)            Wave 3 (after weights, ~h6-9)       Gate      Wave 4 (h12+)
+A01 train [GPU, long] ──────────────────────────────▶ A05 evaluate [GPU]                            A09 harness ◀─ B's Rover
+   └─ ml/model.py early ─────────────────────────────▶ A06 precompute [GPU] ─▶ A10 calibrate (P1)    A11b decision card
+A02 terrain ───────────┐                               A07b live inference                          A12 3D view (P1)
+A03 warp + tiles ──────┼─▶ A04 world builder ──▶ B     A11a frames + overlays                       slides (human)
+                       └─▶ A07a perception (cached) ─────────────────────────────────▶ G3 (h12)
+A08 mapping tests
 ```
 
-## Gotchas
-- `test_min3` is both your test set and the world tiles. **Never train or tune on it.** Calibrate on your validation split.
-- Check that no `test_min3` image id appears in the training subset.
-- Big rock is about 0.5% of pixels. Without class weights the model will predict it close to never.
-- Coordinates are `(row, col)`. Heading 0 is north (row decreasing), clockwise. `sensor_cone()` already follows this.
+| ID | Task | Wave | Depends on | GPU | Est. | Brief |
+|---|---|---|---|---|---|---|
+| A01 | Train U-Net | 1 | n/a | yes, long | 30 min setup, 2 to 4 h train | [A01](stream_a/tasks/A01-train.md) |
+| A02 | Terrain grids | 1 | n/a | | 1 h | [A02](stream_a/tasks/A02-terrain.md) |
+| A03 | Warp + tile library | 1 | n/a | | 2 to 3 h | [A03](stream_a/tasks/A03-warp-tiles.md) |
+| A08 | Cost map tests | 1 | n/a | | 1 h | [A08](stream_a/tasks/A08-mapping.md) |
+| A04 | World builder (**hand to B**) | 2 | A02, A03 | | 1.5 h | [A04](stream_a/tasks/A04-world-builder.md) |
+| A07a | observe() model mode, cached | 2 | A03 (+ fake preds until A06) | | 2 h | [A07](stream_a/tasks/A07-perception-model-mode.md) |
+| A05 | Segmentation metrics | 3 | A01 | yes | 45 min | [A05](stream_a/tasks/A05-evaluate.md) |
+| A06 | Precompute preds + logits | 3 | A01, A03 | yes | 30 min | [A06](stream_a/tasks/A06-precompute.md) |
+| A07b | Live inference for blur | 3 | A01, A07a | | 1 h | [A07](stream_a/tasks/A07-perception-model-mode.md) |
+| A11a | Frames + overlays | 3 | A01 | | 45 min | [A11](stream_a/tasks/A11-frames-overlays-card.md) |
+| A10 | Calibration (P1) | 3/4 | A06 | | 45 min | [A10](stream_a/tasks/A10-calibration.md) |
+| A09 | Eval harness | 4 | B's `Rover`, A04, A07 | | 3 to 4 h | [A09](stream_a/tasks/A09-harness.md) |
+| A11b | Decision card data | 4 | B's planner, A07, A08 | | 1 h | [A11](stream_a/tasks/A11-frames-overlays-card.md) |
+| A12 | 3D view (P1) | 4 | B's `/api/world` | | 2 h | [A12](stream_a/tasks/A12-terrain-3d.md) |
+
+**Max useful parallelism:** 4 subagents in Wave 1, 2 to 3 afterwards. More than that just adds merge noise.
+
+**Spawning a subagent:** give it (1) the brief file contents, (2) its worktree path, (3) the `PY` and `RR_ARTIFACTS` values, (4) "Follow AGENTS.md; edit only the files your brief lists under 'You own'; finish with the push sequence in STREAM_A.md section 3; reply with the brief's 'Hand back' items."
+
+## 5. Human checkpoints (Pranoy, not agents)
+
+| When | What you do |
+|---|---|
+| Hour 0 | 20-min contract meeting with the B teammate. Start the orchestrator on Wave 1 |
+| After A03 | **Look at the warp contact sheets.** If ground doesn't look like ground from above, the whole world is wrong |
+| After A04 (~h6) | Tell B: swap `build_stub_world` for `world.builder.build_world`. Pick the demo seed together |
+| A07 contract change | Approve the `Belief.weight` field with B |
+| After A05 | Read the metrics. Big-rock IoU < 0.15 → have the orchestrator relaunch A01 with a higher weight, in the background |
+| **Hour 12, gate G3** | With B: switch to `mode="model"` and watch the route change because of model output. **Nothing else matters until this works** |
+| Hour 16 | P0 freeze: no new features until every P0 works end to end |
+| After A09 | Sanity-check the results table before it goes on a slide |
+| Hours 21 to 24 | Slides (data sources, architecture, metrics, results, honesty notes), rehearse with B 3× |
+
+## 6. Hour plan (wall clock)
+
+| Hours | Orchestrator runs | Milestone |
+|---|---|---|
+| 0 to 1 | A01, A02, A03, A08 in parallel | Training running, loss logged |
+| 1 to 3 | A02 and A08 land; A03 continues | `world/terrain.npz` committed |
+| 3 to 6 | A04, A07a (fake preds) | **h6: `build_world` handed to B** |
+| 6 to 9 | A05 → A06 (GPU, in sequence), A07b, A11a | Metrics + `preds20.npz` committed |
+| 9 to 12 | Finish A07; integration fixes | **h12: G3, route changes on model output** |
+| 12 to 16 | A09 (once B's Rover lands), A10 | `eval/results.md` |
+| 16 to 19 | A11b, A10 rerun of A06 with T | Decision card has real numbers |
+| 19 to 21 | A12 (cut if behind) | 3D view |
+| 21 to 24 | Human: slides, rehearsal | Demo locked |
+
+**Cut order if behind:** A12 (3D), then A10 (calibration). Never cut A07/G3 or A09.
+
+## 7. Interfaces Stream A promises Stream B
+
+```python
+world.builder.build_world(seed) -> World                                    # h6, drop-in for build_stub_world
+backend.app.perception.observe(world, belief, pose, sensor, flags, mode)    # oracle now; "model" at h12
+backend.app.mapping.cost_grid(world, belief, cfg) -> (cost >= 1 float32, blocked bool)   # now
+backend.app.mapping.explain_cell(world, belief, cfg, cell) -> dict          # A08
+eval.decision_card.decision_card(world, belief, cfg, start, goal, path) -> dict  # A11b
+files: eval/results.json, eval/seg_metrics.json, terrain/frames/<id>.jpg, terrain/overlays/<id>.png
+```
+And what Stream A needs from B: `planner.plan()` (around h4) and a headless `Rover(...).run_to_completion(...)` (around h12) for A09.
+
+## 8. Facts already verified (don't rediscover them)
+
+- **DTM crop** `terrain/jezero_crop.tif`: 18.43910°N 77.40880°E, 58 × 58 at 1 m with 4 m padding. Plateau with median slope 4.5°, delta-front scarp on the east edge (about 11% over 20°), 16 m relief. The landing site was rejected as too flat.
+- **AI4Mars** (`hassanjbara/AI4MARS`): 1024 × 1024 uint8; columns `image, label_mask, rover_mask, range_mask, has_masks, has_labels`. Some train rows have no labels (filter `has_labels`). No id column, so ids are `m3_<row>`. `rover_mask==1` is the rover body at the bottom (18 to 44%); `range_mask==1` is beyond 30 m at the top. 73 to 85% of each test image is 255.
+- **Light delay** today: 10.9 min one-way (`terrain/light_delay.json`).
+- **GPU:** RTX 5060 Laptop, 8 GB, torch 2.11 + cu128 working.
+
+## 9. Honesty notes (go on a slide)
+
+- The AI4Mars images are Curiosity NAVCAM; the simulated rover is Perseverance at Jezero.
+- The top-down tiles come from a flat-ground homography with no camera intrinsics.
+- The geometric obstacles from the fault panel are simulated.
+- The world stitches unrelated images into tiles, so tile edges are discontinuous by construction.

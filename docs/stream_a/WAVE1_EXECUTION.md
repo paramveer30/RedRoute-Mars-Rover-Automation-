@@ -36,7 +36,70 @@ work at the human checkpoints in section 5.
 
 ## Results
 
-Pending task completion.
+| Task | Status | Published commits |
+| --- | --- | --- |
+| A01 | Model and trainer published; smoke passed; full training running | `18b581b`, `a64cf3d` |
+| A02 | Complete | `e4b5ae6` |
+| A03 | Complete; human visual review pending | `134e9ff`, `4318808` |
+| A08 | Complete | `9a22dc8` |
+
+### A01: training
+
+- GPU smoke run completed in 58.03 seconds, with a checkpoint, CSV log,
+  49,007,035-byte fp16 export, and successful offline CPU fp32 inference.
+- Smoke used 55 training rows and 7 validation rows. These are smoke
+  checks, not evidence of final model quality.
+- Default full training started with 20 requested epochs, batch 16,
+  input size 256, and the fixed 500-row validation split. No test set is
+  used for training or checkpoint selection.
+- Full-run final validation metrics and deployable weights are pending.
+  Do not use the smoke export as the trained deliverable.
+- Training process launched hidden with PID `43164`. Process existence
+  alone does not prove success: inspect the logs and final summary.
+- Logs: `C:/Pranoy/Machacks/rr-artifacts/runs/train/stdout.log`,
+  `stderr.log`, and `log.csv`; successful completion writes `summary.json`.
+- Retain `C:/Pranoy/Machacks/wt/A01` until training, final verification,
+  and the final weights push are complete.
+
+### A02: real terrain
+
+- Elevation range: -2489.841553 to -2477.150146 m.
+- Slope median: 3.854343 degrees; p95: 29.208776 degrees;
+  share above 20 degrees: 10.9625%.
+- Roughness standard deviation: 0.180279.
+- Task and orchestrator inspected the plot; the eastern scarp is visible.
+- Plot: `C:/Pranoy/Machacks/rr-artifacts/runs/terrain/terrain.png`.
+- Full suite after task rebase: 10 passed.
+
+### A03: warp and tile library
+
+- All 322 source ids, homographies, and label grids are in `world/tiles.npz`;
+  all 322 image patches are under the shared artifact directory.
+- 149 usable tiles at the unchanged labelled-fraction threshold of 0.6.
+- Class cell counts across usable tiles: soil 28,257; bedrock 8,997;
+  sand 15,120; big rock 8.
+- Usable tiles containing each class: soil 79; bedrock 39; sand 51;
+  big rock 1. Big-rock diversity is very sparse.
+- Clear arm/wheel failures `m3_0000`, `m3_0275`, and `m3_0020` fail the
+  usable threshold. Some masked rover-edge intrusion remains.
+- Task and orchestrator inspected all three review sheets. This does not
+  replace the required human review.
+- Review sheets under `C:/Pranoy/Machacks/rr-artifacts/runs/warp/`:
+  `contact_random_01.png`, `contact_random_02.png`, `contact_edge_cases.png`.
+- The warp remains a flat-ground approximation without camera intrinsics
+  or calibrated metric scale, as required by the honesty notes.
+- Full suite after final task rebase: 44 passed.
+
+### A08: mapping
+
+- Added a defensive cost floor, cached inflation footprints, faster
+  semantic blob filtering, and JSON-serializable `explain_cell()` output.
+- 18 mapping checks cover all brief requirements, including the hidden
+  truth/unsensed-geometry boundary and the 113-cell inflation footprint.
+- Measured 200 x 200 runtime: median 3.749 ms, p95 6.110 ms over 25
+  calls after 5 warmups.
+- Full suite after task rebase: 43 passed.
+- No shared contract changes.
 
 ## Human checkpoints and follow-on work
 

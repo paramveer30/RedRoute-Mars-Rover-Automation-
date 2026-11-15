@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { CameraPanel } from './CameraPanel'
 import { MissionMap } from './MissionMap'
 import { useMission, type LayerKey } from './store'
 import type { FaultType, PerceptionMode, RoverState } from './types'
@@ -52,11 +53,16 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
 }
 
 export default function App() {
-  const { connected, last, link, events, layers, toggle, connect, resume, stop, reset, setMode, setCompression, fault } =
-    useMission()
+  const {
+    connected, last, link, events, layers, toggle, connect, resume, stop, reset, setMode, setCompression, fault,
+    token, role, setToken, tamper, replay,
+  } = useMission()
   const [err, setErr] = useState<string | null>(null)
   const [seed, setSeed] = useState('1')
   useEffect(() => connect('demo'), [connect])
+  useEffect(() => {
+    setToken(token)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const run = async (p: Promise<string | null>) => setErr(await p)
   const mode = last?.perception_mode
@@ -142,7 +148,18 @@ export default function App() {
           </section>
 
           <section className="space-y-2 rounded border border-white/10 p-3">
-            <h2 className="font-semibold">Operator</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold">Operator</h2>
+              <select className="rounded bg-white/10 px-2 py-0.5 text-xs" value={token}
+                onChange={(e) => setToken(e.target.value)} title="demo role tokens">
+                <option value="operator-demo">operator</option>
+                <option value="viewer-demo">viewer (read-only)</option>
+              </select>
+            </div>
+            <div className="text-xs text-white/50">
+              role: <span className={role === 'operator' ? 'text-green-400' : 'text-amber-300'}>{role ?? 'none'}</span>
+              {' · '}commands HMAC-SHA256 signed
+            </div>
             <div className="flex flex-wrap gap-2">
               <button className="rounded bg-green-700 px-2 py-1 hover:bg-green-600 disabled:opacity-40"
                 disabled={last?.state !== 'SAFE_STOP'} onClick={() => run(resume())}>Resume</button>
@@ -160,6 +177,14 @@ export default function App() {
                 <option value="model">model</option>
                 <option value="geometry_only">geometry_only</option>
               </select>
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button className="rounded bg-orange-900/70 px-2 py-1 text-xs hover:bg-orange-800"
+                title="Sign a command, then alter it in transit: the rover must reject it"
+                onClick={() => run(tamper())}>Tamper demo</button>
+              <button className="rounded bg-orange-900/70 px-2 py-1 text-xs hover:bg-orange-800"
+                title="Resend the last signed command verbatim: rejected as a replay"
+                onClick={() => run(replay())}>Replay last</button>
             </div>
             {err && <div className="text-red-400">{err}</div>}
           </section>
@@ -184,9 +209,11 @@ export default function App() {
           </section>
         </aside>
 
-        <section className="flex min-w-72 flex-1 flex-col rounded border border-white/10 p-3 text-sm">
+        <div className="flex min-w-72 flex-1 flex-col gap-4">
+        <CameraPanel />
+        <section className="flex flex-1 flex-col rounded border border-white/10 p-3 text-sm">
           <h2 className="mb-1 font-semibold">Events</h2>
-          <ol className="max-h-[640px] flex-1 space-y-0.5 overflow-y-auto font-mono text-xs">
+          <ol className="max-h-[360px] flex-1 space-y-0.5 overflow-y-auto font-mono text-xs">
             {events.map((e, i) => (
               <li key={i} className={e.level === 'error' ? 'text-red-400' : e.level === 'warn' ? 'text-amber-300' : 'text-white/80'}>
                 <span className="text-white/40">{e.mission_time.toFixed(1)}s</span> {e.msg}
@@ -196,6 +223,7 @@ export default function App() {
             ))}
           </ol>
         </section>
+        </div>
       </main>
     </div>
   )

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { signCommand } from './sign'
 import type { FaultType, GroundEvent, LinkInfo, LinkMsg, MissionEvent, PerceptionMode, Tick, WorldLayers } from './types'
 
 export const GRID = 200
@@ -22,6 +23,9 @@ export type LayerKey = 'hillshade' | 'classes' | 'uncertainty' | 'blocked' | 'pa
 
 interface MissionStore {
   missionId: string
+  token: string
+  role: 'operator' | 'viewer' | null
+  lastSigned: Record<string, unknown> | null
   connected: boolean
   last: Tick | null
   link: LinkInfo | null
@@ -46,6 +50,19 @@ interface MissionStore {
   setMode: (mode: PerceptionMode) => Promise<string | null>
   setCompression: (c: number) => Promise<string | null>
   fault: (type: FaultType, params?: Record<string, unknown>) => Promise<string | null>
+  setToken: (token: string) => Promise<void>
+  roverCommand: (cmd: Record<string, unknown>, opts?: { tamper?: boolean }) => Promise<string | null>
+  tamper: () => Promise<string | null>
+  replay: () => Promise<string | null>
+}
+
+const TOKEN_KEY = 'redroute.token'
+function savedToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? 'operator-demo'
+  } catch {
+    return 'operator-demo'
+  }
 }
 
 const emptyBuffers = () => ({
@@ -68,6 +85,9 @@ async function loadWorld(seed: number, set: (p: Partial<MissionStore>) => void) 
 
 export const useMission = create<MissionStore>((set, get) => ({
   missionId: 'demo',
+  token: savedToken(),
+  role: null,
+  lastSigned: null,
   connected: false,
   last: null,
   link: null,
@@ -131,6 +151,8 @@ export const useMission = create<MissionStore>((set, get) => ({
           trail = [...trail, [t.pose.x, t.pose.y] as [number, number]].slice(-2000)
         }
         if (t.events.length) events = [...t.events.filter((e) => e.kind !== 'state'), ...events].slice(0, 300)
+        const goalChanged = (t.goal?.join() ?? '') !== (s.last?.goal?.join() ?? '')
+        if (goalChanged && s.pendingTarget) set({ pendingTarget: null })
         set({ last: t, link: t.link, cls, unc, blocked, trail, events, beliefVersion: s.beliefVersion + 1 })
       }
     }
@@ -147,7 +169,7 @@ export const useMission = create<MissionStore>((set, get) => ({
   command: async (body) => {
     const res = await fetch(`/api/missions/${get().missionId}/command`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${get().token}` },
       body: JSON.stringify(body),
     })
     if (res.ok) return null
@@ -155,14 +177,38 @@ export const useMission = create<MissionStore>((set, get) => ({
     return String(err.detail ?? res.statusText)
   },
   setTarget: async (x, y) => {
-    const err = await get().command({ type: 'target', x, y })
+    const err = await get().roverCommand({ type: 'target', x, y })
     if (!err) set({ pendingTarget: [x, y] })
     return err
   },
-  resume: () => get().command({ type: 'resume', route_version: get().last?.route_version }),
-  stop: () => get().command({ type: 'stop' }),
+  resume: () => get().roverCommand({ type: 'resume', route_version: get().last?.route_version }),
+  stop: () => get().roverCommand({ type: 'stop' }),
   reset: (seed, mode) => get().command({ type: 'reset', seed, mode }),
   setMode: (mode) => get().command({ type: 'mode', mode }),
+  setToken: async (token) => {
+    try {
+      localStorage.setItem(TOKEN_KEY, token)
+    } catch {
+      /* private mode: keep in memory only */
+    }
+    set({ token })
+    const r = await fetch('/api/session', { headers: { Authorization: `Bearer ${token}` } })
+    const j = (await r.json()) as { role: 'operator' | 'viewer' | null }
+    set({ role: j.role })
+  },
+  roverCommand: async (cmd, opts) => {
+    // Signed with the operator key; a viewer's signature is simply wrong and the server refuses it.
+    const signed = await signCommand(get().token, cmd)
+    if (opts?.tamper) return get().command({ ...signed, tamper: true })
+    const err = await get().command(signed)
+    if (!err) set({ lastSigned: signed }) // replay demo resends a command the rover already ran
+    return err
+  },
+  tamper: () => get().roverCommand({ type: 'target', x: 100, y: 100 }, { tamper: true }),
+  replay: async () => {
+    const prev = get().lastSigned
+    return prev ? get().command(prev) : 'nothing to replay yet'
+  },
   setCompression: (compression) => get().command({ type: 'link', compression }),
   fault: async (type, params = {}) => {
     const res = await fetch(`/api/missions/${get().missionId}/faults`, {

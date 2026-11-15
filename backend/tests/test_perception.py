@@ -192,3 +192,46 @@ def test_cached_observation_under_twenty_ms(scene):
     median, p95 = np.percentile(timings, [50, 95])
     print(f"cached observe median={median:.3f} ms p95={p95:.3f} ms")
     assert median < 20
+
+
+def test_live_predict_uses_actual_degraded_pixels_and_normalizes(monkeypatch, tmp_path):
+    import torch
+    from ml import infer
+    from world.warp import homography_for
+    checker = ((np.indices((1024, 1024)).sum(axis=0) // 8 % 2) * 255).astype(np.uint8)
+    inputs = []
+    class FakeModel(torch.nn.Module):
+        def forward(self, tensor):
+            inputs.append(tensor.clone())
+            x = tensor[:, :1]
+            return torch.cat((x, -x, torch.zeros_like(x), torch.ones_like(x)), dim=1)
+    monkeypatch.setattr(infer, "_dataset", lambda: [{"image": checker}])
+    monkeypatch.setattr(infer, "get_model", lambda: FakeModel())
+    monkeypatch.setattr(infer, "CALIBRATION", tmp_path / "absent.json")
+    body = np.zeros((1024, 1024), np.uint8)
+    body[700:] = 1
+    monkeypatch.setattr(infer, "_homographies", lambda: {"m3_0000": homography_for(body)})
+    for blur, noise in [(0, 0), (.8, 0), (0, .5)]:
+        result = infer.predict_tile("m3_0000", blur=blur, noise=noise)
+        assert result.shape == (20, 20, 4) and result.dtype == np.float32
+        np.testing.assert_allclose(result.sum(-1), 1, atol=1e-6)
+    assert inputs[1].std() < inputs[0].std()
+    assert not torch.equal(inputs[2], inputs[0])
+    with pytest.raises(ValueError):
+        infer.predict_tile("m3_0000", blur=float("nan"))
+    with pytest.raises(ValueError):
+        infer.predict_tile("m3_0001")
+
+
+def test_temperature_reads_validation_calibration_and_reloads(monkeypatch, tmp_path):
+    from ml import infer
+    calibration = tmp_path / "calibration.json"
+    monkeypatch.setattr(infer, "CALIBRATION", calibration)
+    assert infer.temperature() == 1
+    calibration.write_text('{"T": 1.5}', encoding="utf-8")
+    assert infer.temperature() == 1.5
+    calibration.write_text('{"T": 2.25}', encoding="utf-8")
+    assert infer.temperature() == 2.25
+    calibration.write_text('{"T": -1}', encoding="utf-8")
+    with pytest.raises(ValueError):
+        infer.temperature()

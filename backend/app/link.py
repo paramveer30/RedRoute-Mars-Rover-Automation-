@@ -71,6 +71,7 @@ class Link:
         self.ground_time = 0.0              # mission_time of newest telemetry the ground has
         self.dropped_uplink = 0
         self._was_blackout = False
+        self.auth = CommandAuth()
 
     # ---------------------------------------------------------------- state
     @property
@@ -154,7 +155,8 @@ class Link:
 
 def check_precondition(command: dict, route_version: int, state: str) -> CommandResult:
     """Reject commands built on a superseded route or an unexpected rover state."""
-    pre = command.get("precondition") or {}
+    pre = command.get("precondition") or {
+        k: command[k] for k in ("route_version", "expected_state") if command.get(k) is not None}
     expected_rv = pre.get("route_version")
     if expected_rv is not None and int(expected_rv) != int(route_version):
         return CommandResult(False, f"route v{expected_rv} superseded by v{route_version}")
@@ -162,3 +164,58 @@ def check_precondition(command: dict, route_version: int, state: str) -> Command
     if expected_state and expected_state != state:
         return CommandResult(False, f"expected state {expected_state}, rover is {state}")
     return CommandResult(True)
+
+
+# ---------------------------------------------------------------- command security (P1)
+import hashlib  # noqa: E402
+import hmac  # noqa: E402
+import os  # noqa: E402
+import time as _time  # noqa: E402
+
+OPERATOR_TOKEN = os.environ.get("RR_OPERATOR_TOKEN", "operator-demo")
+VIEWER_TOKEN = os.environ.get("RR_VIEWER_TOKEN", "viewer-demo")
+
+
+def role_for(token: str | None) -> str | None:
+    if token and hmac.compare_digest(token, OPERATOR_TOKEN):
+        return "operator"
+    if token and hmac.compare_digest(token, VIEWER_TOKEN):
+        return "viewer"
+    return None
+
+
+def canonical(cmd: dict) -> str:
+    """Stable JSON of everything except the signature (the frontend mirrors this exactly)."""
+    body = {k: v for k, v in cmd.items() if k != "sig" and v is not None}
+    return json.dumps(body, sort_keys=True, separators=(",", ":"))
+
+
+def sign(key: str, cmd: dict) -> str:
+    """hmac_sha256(key, canonical(cmd) + seq), hex. ``seq`` is part of the signed body too."""
+    msg = canonical(cmd) + str(cmd.get("seq"))
+    return hmac.new(key.encode(), msg.encode(), hashlib.sha256).hexdigest()
+
+
+class CommandAuth:
+    """Rover-side verifier: valid HMAC and a strictly increasing seq (no replays)."""
+
+    def __init__(self, key: str = OPERATOR_TOKEN):
+        self.key = key
+        self.last_seq = 0
+
+    def sign(self, cmd: dict) -> dict:
+        out = dict(cmd)
+        out["seq"] = max(int(_time.time() * 1000), self.last_seq + 1)
+        out["sig"] = sign(self.key, out)
+        return out
+
+    def verify(self, cmd: dict) -> CommandResult:
+        sig, seq = cmd.get("sig"), cmd.get("seq")
+        if not sig or seq is None:
+            return CommandResult(False, "unsigned command")
+        if not hmac.compare_digest(str(sig), sign(self.key, cmd)):
+            return CommandResult(False, "bad signature (tampered?)")
+        if int(seq) <= self.last_seq:
+            return CommandResult(False, f"replayed or old seq {seq} (last {self.last_seq})")
+        self.last_seq = int(seq)
+        return CommandResult(True)

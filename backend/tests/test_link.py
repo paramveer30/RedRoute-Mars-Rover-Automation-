@@ -76,3 +76,40 @@ def test_stale_route_version_rejected():
 def test_expected_state_precondition():
     res = check_precondition({"precondition": {"expected_state": "SAFE_STOP"}}, 1, "DRIVING")
     assert not res.accepted and "SAFE_STOP" in res.reason
+
+
+def _signed(auth, **cmd):
+    from backend.app.link import sign
+    cmd["seq"] = cmd.get("seq", auth.last_seq + 1)
+    cmd["sig"] = sign(auth.key, cmd)
+    return cmd
+
+
+def test_hmac_accepts_valid_and_rejects_tamper_replay_unsigned():
+    from backend.app.link import CommandAuth
+    auth = CommandAuth("k")
+    good = _signed(auth, type="target", x=10, y=20, seq=5)
+    assert auth.verify(good).accepted
+    assert "replayed" in auth.verify(good).reason          # same seq again
+    old = _signed(auth, type="stop", seq=3)
+    assert "old seq" in auth.verify(old).reason
+    tampered = _signed(auth, type="target", x=10, y=20, seq=9)
+    tampered["x"] = 99
+    assert "bad signature" in auth.verify(tampered).reason
+    assert auth.verify({"type": "stop"}).reason == "unsigned command"
+    assert auth.last_seq == 5
+
+
+def test_server_side_sign_roundtrip_matches_canonical():
+    from backend.app.link import CommandAuth, canonical
+    auth = CommandAuth("k")
+    cmd = auth.sign({"type": "resume", "precondition": {"route_version": 2}})
+    assert auth.verify(cmd).accepted
+    assert canonical({"b": 1, "a": None, "sig": "x", "c": {"z": 1, "y": 2}}) == '{"b":1,"c":{"y":2,"z":1}}'
+
+
+def test_roles():
+    from backend.app.link import OPERATOR_TOKEN, VIEWER_TOKEN, role_for
+    assert role_for(OPERATOR_TOKEN) == "operator"
+    assert role_for(VIEWER_TOKEN) == "viewer"
+    assert role_for("nope") is None and role_for(None) is None

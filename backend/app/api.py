@@ -22,7 +22,10 @@ from functools import lru_cache
 from typing import Any, Literal
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+import re
+
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -30,7 +33,7 @@ from world.builder import build_world
 
 from . import faults
 from .contracts import GRID, N_TILES, TILE, CostConfig, World, tile_id
-from .link import Link, check_precondition
+from .link import CommandAuth, Link, check_precondition, role_for
 from .missionlog import MissionLog
 from .rover import TICK_S, Rover
 
@@ -179,10 +182,16 @@ async def _ground_event(m: Mission, level: str, msg: str, **data) -> None:
                          "mission_time": round(m.link.ground_time, 2), "data": data})
 
 
-def apply_command(rover: Rover, cmd: dict) -> None:
+def apply_command(rover: Rover, cmd: dict, auth: CommandAuth | None = None) -> None:
     """Run a command that has arrived at the rover. Rejections become rover events."""
-    check = check_precondition(cmd, rover.route_version, rover.state.value)
     kind = cmd.get("type")
+    if auth is not None:
+        sec = auth.verify(cmd)
+        if not sec.accepted:
+            rover._emit("error", "command_rejected", f"SECURITY: rejected {kind}: {sec.reason}",
+                        command=kind, reason=sec.reason, security=True)
+            return
+    check = check_precondition(cmd, rover.route_version, rover.state.value)
     if not check.accepted:
         rover._emit("error", "command_rejected", f"Rejected {kind}: {check.reason}",
                     command=kind, reason=check.reason)
@@ -206,7 +215,7 @@ def tick(m: Mission) -> tuple[list[dict], dict]:
     now = r.mission_time + 1e-9
     r.link_up = not link.in_blackout(now)
     for msg in link.recv_up(now):
-        apply_command(r, msg.body)
+        apply_command(r, msg.body, link.auth)
     events = r.step()
     if m.run_id >= 0:
         try:
@@ -269,6 +278,9 @@ class Command(BaseModel):
     compression: float | None = None
     route_version: int | None = None    # precondition: the route the operator was looking at
     expected_state: str | None = None   # precondition
+    seq: int | None = None              # signed, strictly increasing (anti-replay)
+    sig: str | None = None              # hex hmac_sha256(operator key, canonical(cmd) + seq)
+    tamper: bool | None = None          # demo only: server flips x after signing
 
 
 class Fault(BaseModel):
@@ -276,6 +288,37 @@ class Fault(BaseModel):
                   "model_offline", "blackout", "stale_command"]
     duration_s: float | None = None
     frames: int | None = None
+
+
+@app.get("/api/session")
+def session(authorization: str | None = Header(default=None)):
+    token = (authorization or "").removeprefix("Bearer ").strip() or None
+    return {"role": role_for(token)}
+
+
+_FRAME_ID = re.compile(r"^m3_\d{4}$")
+
+
+def _asset(kind: str, frame_id: str):
+    from world.paths import FRAMES_DIR, OVERLAYS_DIR
+    if not _FRAME_ID.match(frame_id):
+        raise HTTPException(400, "bad frame id")
+    path = (FRAMES_DIR / f"{frame_id}.jpg") if kind == "frame" else (OVERLAYS_DIR / f"{frame_id}.png")
+    if not path.exists():
+        raise HTTPException(404, f"no {kind} for {frame_id}")
+    return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/api/frames/{frame_id}")
+def frame(frame_id: str):
+    """Real AI4Mars NAVCAM frame behind the tile the camera is looking at."""
+    return _asset("frame", frame_id)
+
+
+@app.get("/api/overlays/{frame_id}")
+def overlay(frame_id: str):
+    """Stream A's model class overlay for the same frame."""
+    return _asset("overlay", frame_id)
 
 
 @app.get("/api/missions/{mission_id}")
@@ -288,19 +331,28 @@ def mission_info(mission_id: str):
 
 
 @app.post("/api/missions/{mission_id}/command")
-async def mission_command(mission_id: str, cmd: Command):
+async def mission_command(mission_id: str, cmd: Command,
+                          authorization: str | None = Header(default=None)):
     m = get_mission(mission_id)
     async with m.lock:
         r, link = m.rover, m.link
         now = r.mission_time
         if cmd.type in ("target", "resume", "stop"):
+            token = (authorization or "").removeprefix("Bearer ").strip() or None
+            role = role_for(token)
+            if role != "operator":
+                await _ground_event(m, "error", f"Refused {cmd.type}: role {role or 'anonymous'} "
+                                    "is read-only")
+                raise HTTPException(403 if role else 401, "operator token required to command")
             if cmd.type == "target" and (cmd.x is None or cmd.y is None
                                          or not (0 <= cmd.x < GRID and 0 <= cmd.y < GRID)):
                 raise HTTPException(400, "target needs x (col) and y (row) inside the grid")
             body = cmd.model_dump(exclude_none=True)
-            pre = {k: body.pop(k) for k in ("route_version", "expected_state") if k in body}
-            if pre:
-                body["precondition"] = pre
+            if body.pop("tamper", False):
+                # Man-in-the-middle demo: the payload changes after it was signed.
+                body["x"] = (int(body.get("x", 0)) + 37) % GRID
+                body.setdefault("y", 100)
+                body["type"] = "target"
             sent = link.send_up(now, body)
             if sent is None:
                 await _ground_event(m, "error", f"Uplink dropped ({cmd.type}): link in BLACKOUT")

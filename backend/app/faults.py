@@ -86,7 +86,7 @@ def inject(rover: Rover, link: Link, fault: str, now: float | None = None,
         stale_rv = int(params.get("route_version", rover.route_version - 1))
         cmd = {"type": "resume" if rover.state.value == "SAFE_STOP" else "stop",
                "precondition": {"route_version": stale_rv}, "origin": "fault:stale_command"}
-        sent = link.send_up(now, cmd)
+        sent = link.send_up(now, link.auth.sign(cmd))   # validly signed, just stale
         msg = (f"Sent '{cmd['type']}' built on route v{stale_rv} "
                f"(arrives in {link.delay_s:.1f} s)" if sent else
                "Stale command dropped: link in blackout")

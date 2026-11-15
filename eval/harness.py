@@ -25,7 +25,7 @@ import numpy as np
 from backend.app.contracts import RES_M, Cell, CostConfig, SensorConfig
 from eval import metrics
 from eval.rover_api import as_mission_result
-from world.paths import EVAL_RESULTS, REPO, RUNS_DIR
+from world.paths import EVAL_RESULTS, PREDS_NPZ, REPO, RUNS_DIR
 
 CONFIGS: dict[str, tuple[str, CostConfig]] = {
     "geometry_only": ("geometry_only", CostConfig(use_semantics=False)),
@@ -168,8 +168,33 @@ def run(n: int, workers: int, configs: list[str], rover: str,
         scenarios.setdefault(r["seed"], {"start": r["start"], "goal": r["goal"],
                                          "optimal_m": r["optimal_m"]})
     meta = {"rover": rover, "seeds": seeds, "workers": workers, "wall_s": wall,
-            "scenarios": scenarios, "definitions": DEFINITIONS}
+            "scenarios": scenarios, "definitions": DEFINITIONS, "conditions": conditions()}
     return records, meta
+
+
+def conditions() -> dict:
+    """What the numbers depend on beyond the code: prediction cache and cost rules."""
+    from backend.app import mapping
+    cfg = CostConfig()
+    cache = {"path": Path(PREDS_NPZ).relative_to(REPO).as_posix()}
+    try:
+        with np.load(PREDS_NPZ, allow_pickle=False) as data:
+            for key in ("temperature", "weights_sha256", "tile_agreement"):
+                if key in data:
+                    value = data[key].item()
+                    cache[key] = value if isinstance(value, str) else float(value)
+    except OSError as exc:
+        cache["error"] = str(exc)
+    return {
+        "prediction_cache": cache,
+        "sand_blocking": (f"known cells with belief P(sand) >= {mapping.P_SAND_BLOCK:g} are blocked "
+                          f"(blobs < {cfg.min_blob_cells} cells dropped), inflated by "
+                          f"{mapping.SAND_INFLATE_M:g} m; big rock P > {cfg.p_big_rock_block:g}, "
+                          f"slope > {cfg.max_slope_deg:g} deg and sensed geometry inflated by "
+                          f"{cfg.inflate_m:g} m; sub-threshold sand keeps soft cost w_s*risk"),
+        "configs": {name: {"mode": mode, "cost_cfg": {k: getattr(c, k) for k in c.__dataclass_fields__}}
+                    for name, (mode, c) in CONFIGS.items()},
+    }
 
 
 def _parse_configs(text: str) -> list[str]:

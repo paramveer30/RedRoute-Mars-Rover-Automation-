@@ -78,6 +78,7 @@ def summarize(records: list[dict], configs: list[str], meta: dict) -> dict:
             "observe_calls_per_s": total_obs / wall if wall > 0 and total_obs is not None else None,
         },
         "definitions": meta["definitions"],
+        "conditions": meta.get("conditions", {}),
         "missions": records,
     }
 
@@ -113,6 +114,13 @@ def to_markdown(summary: dict) -> str:
               f"{_fmt(t['observe_calls_per_s'], 1)} observe() calls/s.", "",
               "## Definitions", ""]
     lines += [f"- **{k}**: {v}" for k, v in summary["definitions"].items()]
+    cond = summary.get("conditions") or {}
+    if cond:
+        cache = cond.get("prediction_cache", {})
+        lines += ["", "## Conditions", "",
+                  f"- **prediction cache**: `{cache.get('path')}`, temperature "
+                  f"{cache.get('temperature', 'n/a')}, weights sha256 `{cache.get('weights_sha256', 'n/a')}`",
+                  f"- **cost map blocking**: {cond.get('sand_blocking', 'n/a')}"]
     lines.append("")
     return "\n".join(lines)
 

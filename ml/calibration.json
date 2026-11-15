@@ -1,0 +1,17 @@
+{
+  "T": 1.5186748519290354,
+  "ece_val_before": 0.025364901774880693,
+  "ece_val_after": 0.008135806881378577,
+  "ece_test_before": 0.013110573787994757,
+  "ece_test_after": 0.003824093931121906,
+  "nll_val_before": 0.14695584291522007,
+  "nll_val_after": 0.12474257434015629,
+  "nll_test_before": 0.08193219908794708,
+  "nll_test_after": 0.06945559036696104,
+  "n_pixels_val": 1143813,
+  "n_pixels_test": 457044,
+  "val_logits_sha256": "6bdfccd150cd7f566164a512727f47c2617c2cab02a54ef2bb6100f5d0db8252",
+  "test_logits_sha256": "a1d3167cc9b220b33e3eefd13f11435c258da04847a9db32e513a13f49ae17f7",
+  "archive_weights_sha256": "a7c5272b640bdf5f133eec6b36cc02518dc896da2d31631084edfebf141cd20e",
+  "archive_fingerprint": "1629574715e18097"
+}

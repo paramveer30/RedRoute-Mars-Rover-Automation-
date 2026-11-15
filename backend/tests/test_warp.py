@@ -84,3 +84,29 @@ def test_image_shape_dtype_and_forward_direction():
 def test_random_labels_are_valid():
     label = np.random.default_rng(0).choice([0, 1, 2, 3, 255], size=(1024, 1024)).astype(np.uint8)
     assert set(np.unique(warp_label(label, homography_for(body())))) <= {0, 1, 2, 3, 255}
+
+
+def test_committed_tile_library_is_complete_and_consistent():
+    import json
+    from ml.ai4mars import tile_id_for
+    from world.paths import TILES_NPZ, USABLE_TILES
+
+    with np.load(TILES_NPZ, allow_pickle=False) as data:
+        assert data['ids'].tolist() == [tile_id_for(i) for i in range(322)]
+        assert data['H'].shape == (322, 3, 3)
+        assert data['H'].dtype == np.float64
+        assert np.isfinite(data['H']).all()
+        assert np.all(np.abs(np.linalg.det(data['H'])) > 1e-10)
+        labels = data['label20']
+        assert labels.shape == (322, 20, 20)
+        assert labels.dtype == np.uint8
+        assert set(np.unique(labels)) <= {0, 1, 2, 3, 255}
+        fractions = (labels != 255).mean(axis=(1, 2))
+        np.testing.assert_allclose(data['valid_frac'], fractions)
+        usable = json.loads(USABLE_TILES.read_text(encoding='utf-8'))
+        threshold = .6 if (fractions >= .6).sum() >= 60 else .5
+        assert usable == sorted(data['ids'][fractions >= threshold].tolist())
+        assert len(usable) >= 60
+        selected = labels[np.isin(data['ids'], usable)]
+        assert np.any(selected == 2, axis=(1, 2)).sum() >= 3
+        assert (selected == 3).any()

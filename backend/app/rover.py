@@ -37,7 +37,7 @@ CHEAPER_ROUTE = 0.9          # after a scan, switch if a new route is >= 10% che
 BATTERY_PER_M = 0.2          # % per metre driven (linear, no energy model)
 BATTERY_PER_TICK = 0.005     # % idle drain per tick
 FOOTPRINT_CELLS = 2          # rover radius 0.5 m, for the simulator hazard check
-START_CLEAR_CELLS = 3        # let the rover plan out of its own inflation buffer
+START_CLEAR_CELLS = 6        # = 1.5 m inflation: let the rover plan out of its own buffer
 
 
 class State(str, Enum):
@@ -241,6 +241,13 @@ class Rover:
             self.safe_stop("no route to goal")
             return False
         self.path, self.path_idx = path, 0
+        # Cells at the start of the route that are blocked are a deliberate escape out of the
+        # rover's own clearance buffer; the replan check must not treat them as new blockage.
+        _, raw_blocked = self._grids()
+        esc = 0
+        while esc < len(path) - 1 and raw_blocked[path[esc]]:
+            esc += 1
+        self._escape_idx = esc
         seg = np.array([0.5 * (cost[a] + cost[b]) * _step_len(a, b)
                         for a, b in zip(path, path[1:])] + [0.0])
         self._plan_remaining = np.cumsum(seg[::-1])[::-1]
@@ -260,9 +267,12 @@ class Rover:
         rest = self.path[self.path_idx + 1:]
         if not rest:
             return None
-        idx = np.array(rest)
-        if blocked[idx[:, 0], idx[:, 1]].any():
-            return "path blocked"
+        check_from = max(self.path_idx + 1, getattr(self, "_escape_idx", 0) + 1)
+        tail = self.path[check_from:]
+        if tail:
+            idx = np.array(tail)
+            if blocked[idx[:, 0], idx[:, 1]].any():
+                return "path blocked"
         now = sum(0.5 * (float(cost[a]) + float(cost[b])) * _step_len(a, b)
                   for a, b in zip(self.path[self.path_idx:], rest))
         then = float(self._plan_remaining[self.path_idx])
@@ -363,8 +373,7 @@ class Rover:
         if s in (State.IDLE, State.SAFE_STOP):
             pass
         elif s in (State.PLANNING, State.REPLANNING):
-            if s == State.PLANNING:
-                self._observe()
+            self._observe()   # always plan on a fresh observation (feeds the watchdog)
             if self._plan("initial" if s == State.PLANNING else self._pending_reason):
                 self._set_state(State.DRIVING)
         elif s == State.SCANNING:

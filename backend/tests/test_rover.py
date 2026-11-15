@@ -230,3 +230,17 @@ def test_planner_never_reads_truth(world):
     r2.set_target((60, 120))
     r2.step()
     assert r2.path == path1
+
+
+def test_escape_from_own_clearance_buffer_does_not_thrash(world):
+    """Rover starts inside the inflated buffer of a seen obstacle: it must plan out once,
+    not replan every tick (regression: seed 13 oracle watchdog SAFE_STOP)."""
+    world.geo_obstacle[146:149, 103:106] = True
+    r = Rover(world, start=(150, 100))
+    r.belief.geo_seen[146:149, 103:106] = True
+    _, blocked = r._grids()
+    assert blocked[150, 100]
+    r.set_target((60, 100))
+    assert run_until(r, lambda r: r.state in (State.IDLE, State.SAFE_STOP))
+    assert r.state == State.IDLE
+    assert r.replans <= 2

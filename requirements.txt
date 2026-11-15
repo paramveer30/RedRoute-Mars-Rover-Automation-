@@ -1,0 +1,15 @@
+# torch/torchvision: install from the CUDA index if you have an NVIDIA GPU (see README)
+torch
+torchvision
+segmentation-models-pytorch
+opencv-python-headless
+rasterio
+numpy
+scipy
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+datasets
+pytest
+matplotlib

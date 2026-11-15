@@ -1,0 +1,31 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Data and artifacts (commit only small crops and cached JSON)
+*.pt
+*.pth
+*.ckpt
+*.sqlite
+*.db
+terrain/preds/*.npy
+terrain/tiles/*
+!terrain/tiles/.gitkeep
+ml/runs/
+ml/checkpoints/
+data/
+*.zip
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.env

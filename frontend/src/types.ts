@@ -10,6 +10,7 @@ export interface MissionEvent {
   msg: string
   data?: Record<string, unknown>
   late?: boolean
+  ground?: boolean // known at the ground immediately (not via downlink)
 }
 
 export interface TileDelta {
@@ -38,9 +39,48 @@ export interface Tick {
   blocked?: string // base64 packbits of the 200x200 blocked mask, sent only when it changes
   perception_mode: PerceptionMode
   frame_image_id: string | null
-  link: { status: 'CONNECTED' | 'BLACKOUT'; delay_s: number }
+  link: LinkInfo
+  late?: boolean
+  initial?: boolean
   events: MissionEvent[]
 }
+
+export interface LinkInfo {
+  status: 'CONNECTED' | 'BLACKOUT'
+  delay_s: number // compressed, what the demo actually waits
+  real_delay_s?: number
+  real_delay_min?: number
+  compression?: number
+  source?: string
+  date?: string | null
+  blackout_remaining_s?: number
+  buffered?: number
+  uplink_in_flight?: number
+  rover_time?: number
+  ground_time?: number
+}
+
+export interface LinkMsg {
+  type: 'link'
+  link: LinkInfo
+}
+
+export interface GroundEvent {
+  type: 'ground_event'
+  level: 'info' | 'warn' | 'error'
+  msg: string
+  mission_time: number
+  data?: Record<string, unknown>
+}
+
+export type FaultType =
+  | 'hidden_rock'
+  | 'drop_frame'
+  | 'corrupt_frame'
+  | 'low_confidence'
+  | 'model_offline'
+  | 'blackout'
+  | 'stale_command'
 
 export interface WorldLayers {
   seed: number

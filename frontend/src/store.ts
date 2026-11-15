@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { MissionEvent, PerceptionMode, Tick, WorldLayers } from './types'
+import type { FaultType, GroundEvent, LinkInfo, LinkMsg, MissionEvent, PerceptionMode, Tick, WorldLayers } from './types'
 
 export const GRID = 200
 export const TILE = 20
@@ -24,6 +24,8 @@ interface MissionStore {
   missionId: string
   connected: boolean
   last: Tick | null
+  link: LinkInfo | null
+  pendingTarget: [number, number] | null
   trail: [number, number][]
   events: MissionEvent[]
   // full-resolution buffers the backend updates by delta
@@ -42,6 +44,8 @@ interface MissionStore {
   stop: () => Promise<string | null>
   reset: (seed?: number, mode?: PerceptionMode) => Promise<string | null>
   setMode: (mode: PerceptionMode) => Promise<string | null>
+  setCompression: (c: number) => Promise<string | null>
+  fault: (type: FaultType, params?: Record<string, unknown>) => Promise<string | null>
 }
 
 const emptyBuffers = () => ({
@@ -66,6 +70,8 @@ export const useMission = create<MissionStore>((set, get) => ({
   missionId: 'demo',
   connected: false,
   last: null,
+  link: null,
+  pendingTarget: null,
   trail: [],
   events: [],
   ...emptyBuffers(),
@@ -89,8 +95,18 @@ export const useMission = create<MissionStore>((set, get) => ({
         if (!closed) retry = setTimeout(open, 1000)
       }
       ws.onmessage = (e) => {
-        const t = JSON.parse(e.data) as Tick
-        if (t.type !== 'tick') return
+        const msg = JSON.parse(e.data) as Tick | LinkMsg | GroundEvent
+        if (msg.type === 'link') {
+          set({ link: msg.link })
+          return
+        }
+        if (msg.type === 'ground_event') {
+          const ev: MissionEvent = { mission_time: msg.mission_time, level: msg.level, kind: 'ground', msg: msg.msg, ground: true }
+          set({ events: [ev, ...get().events].slice(0, 300) })
+          return
+        }
+        if (msg.type !== 'tick') return
+        const t = msg
         const s = get()
         let { cls, unc, blocked, trail, events } = s
         if (t.reset || (s.last && s.last.seed !== t.seed)) {
@@ -115,7 +131,7 @@ export const useMission = create<MissionStore>((set, get) => ({
           trail = [...trail, [t.pose.x, t.pose.y] as [number, number]].slice(-2000)
         }
         if (t.events.length) events = [...t.events.filter((e) => e.kind !== 'state'), ...events].slice(0, 300)
-        set({ last: t, cls, unc, blocked, trail, events, beliefVersion: s.beliefVersion + 1 })
+        set({ last: t, link: t.link, cls, unc, blocked, trail, events, beliefVersion: s.beliefVersion + 1 })
       }
     }
     open()
@@ -138,9 +154,24 @@ export const useMission = create<MissionStore>((set, get) => ({
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     return String(err.detail ?? res.statusText)
   },
-  setTarget: (x, y) => get().command({ type: 'target', x, y }),
-  resume: () => get().command({ type: 'resume' }),
+  setTarget: async (x, y) => {
+    const err = await get().command({ type: 'target', x, y })
+    if (!err) set({ pendingTarget: [x, y] })
+    return err
+  },
+  resume: () => get().command({ type: 'resume', route_version: get().last?.route_version }),
   stop: () => get().command({ type: 'stop' }),
   reset: (seed, mode) => get().command({ type: 'reset', seed, mode }),
   setMode: (mode) => get().command({ type: 'mode', mode }),
+  setCompression: (compression) => get().command({ type: 'link', compression }),
+  fault: async (type, params = {}) => {
+    const res = await fetch(`/api/missions/${get().missionId}/faults`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, ...params }),
+    })
+    if (res.ok) return null
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    return String(err.detail ?? res.statusText)
+  },
 }))

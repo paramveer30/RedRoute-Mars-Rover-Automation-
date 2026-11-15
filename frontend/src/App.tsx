@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { MissionMap } from './MissionMap'
 import { useMission, type LayerKey } from './store'
-import type { PerceptionMode, RoverState } from './types'
+import type { FaultType, PerceptionMode, RoverState } from './types'
 
 const STATE_COLOR: Record<RoverState, string> = {
   IDLE: 'bg-slate-600',
@@ -30,6 +30,18 @@ const LEGEND: [string, string][] = [
   ['#0a0a0a', 'unknown'],
 ]
 
+const FAULTS: [FaultType, string, string][] = [
+  ['hidden_rock', 'Hidden rock', 'Rock appears ~4 m ahead on the route'],
+  ['drop_frame', 'Drop frames', 'Camera stops delivering frames: watchdog'],
+  ['corrupt_frame', 'Corrupt frame', 'One frame fails its checksum'],
+  ['low_confidence', 'Low confidence', 'Blur the next frames (model mode)'],
+  ['model_offline', 'Model offline', 'Geometry-only, half speed'],
+  ['blackout', 'Blackout 15 s', 'Earth link lost'],
+  ['stale_command', 'Stale command', 'Send a command built on an old route'],
+]
+
+const COMPRESSION = [1, 10, 60, 300, 600]
+
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-2">
@@ -40,7 +52,8 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
 }
 
 export default function App() {
-  const { connected, last, events, layers, toggle, connect, resume, stop, reset, setMode } = useMission()
+  const { connected, last, link, events, layers, toggle, connect, resume, stop, reset, setMode, setCompression, fault } =
+    useMission()
   const [err, setErr] = useState<string | null>(null)
   const [seed, setSeed] = useState('1')
   useEffect(() => connect('demo'), [connect])
@@ -58,6 +71,12 @@ export default function App() {
       {(mode === 'geometry_only' || mode === 'offline') && (
         <div className="bg-red-700 px-4 py-1 text-center text-sm font-bold">
           MODEL OFFLINE: geometry-only perception, half speed
+        </div>
+      )}
+      {link?.status === 'BLACKOUT' && (
+        <div className="bg-purple-700 px-4 py-1 text-center text-sm font-bold">
+          COMMS BLACKOUT: {link.blackout_remaining_s?.toFixed(0)} s left · {link.buffered ?? 0} messages buffered
+          onboard · uplink commands are dropped
         </div>
       )}
       {last?.state === 'SAFE_STOP' && (
@@ -90,8 +109,36 @@ export default function App() {
             <Row k="route" v={last ? `v${last.route_version}` : '-'} />
             <Row k="pose" v={last ? `${last.pose.x}, ${last.pose.y} @ ${last.pose.heading}°` : '-'} />
             <Row k="perception" v={mode ?? '-'} />
-            <Row k="link" v={last ? `${last.link.status} (${last.link.delay_s.toFixed(1)} s)` : '-'} />
             <Row k="seed / seq" v={last ? `${last.seed} / ${last.seq}` : '-'} />
+          </section>
+
+          <section className="space-y-1 rounded border border-white/10 p-3 font-mono">
+            <h2 className="mb-1 font-sans font-semibold">Comms link</h2>
+            <Row k="status" v={<span className={link?.status === 'BLACKOUT' ? 'text-purple-300' : 'text-green-400'}>{link?.status ?? '-'}</span>} />
+            <Row k="real delay" v={link?.real_delay_min != null ? `${link.real_delay_min.toFixed(1)} min` : '-'} />
+            <Row k="on-screen delay" v={link ? `${link.delay_s.toFixed(1)} s (×${link.compression})` : '-'} />
+            <div className="text-right text-[10px] text-white/40">{link?.source}{link?.date ? `, ${link.date}` : ''}</div>
+            <Row k="rover clock" v={`${link?.rover_time?.toFixed(1) ?? '-'} s`} />
+            <Row k="ground clock" v={`${link?.ground_time?.toFixed(1) ?? '-'} s`} />
+            <Row k="lag" v={link?.rover_time != null && link.ground_time != null ? `${(link.rover_time - link.ground_time).toFixed(1)} s` : '-'} />
+            <Row k="buffered / uplink" v={`${link?.buffered ?? 0} / ${link?.uplink_in_flight ?? 0}`} />
+            <div className="flex items-center justify-between gap-2 pt-1 font-sans">
+              <span className="text-white/50">time compression</span>
+              <select className="rounded bg-white/10 px-2 py-0.5" value={link?.compression ?? 60}
+                onChange={(e) => run(setCompression(Number(e.target.value)))}>
+                {COMPRESSION.map((c) => <option key={c} value={c}>×{c}</option>)}
+              </select>
+            </div>
+          </section>
+
+          <section className="space-y-2 rounded border border-white/10 p-3">
+            <h2 className="font-semibold">Fault injection</h2>
+            <div className="grid grid-cols-2 gap-1">
+              {FAULTS.map(([type, label, title]) => (
+                <button key={type} title={title} onClick={() => run(fault(type))}
+                  className="rounded bg-red-900/60 px-2 py-1 text-left text-xs hover:bg-red-800">{label}</button>
+              ))}
+            </div>
           </section>
 
           <section className="space-y-2 rounded border border-white/10 p-3">
@@ -143,7 +190,8 @@ export default function App() {
             {events.map((e, i) => (
               <li key={i} className={e.level === 'error' ? 'text-red-400' : e.level === 'warn' ? 'text-amber-300' : 'text-white/80'}>
                 <span className="text-white/40">{e.mission_time.toFixed(1)}s</span> {e.msg}
-                {e.late && <span className="ml-1 rounded bg-white/10 px-1">late</span>}
+                {e.ground && <span className="ml-1 rounded bg-sky-900 px-1">ground</span>}
+                {e.late && <span className="ml-1 rounded bg-purple-800 px-1">late</span>}
               </li>
             ))}
           </ol>

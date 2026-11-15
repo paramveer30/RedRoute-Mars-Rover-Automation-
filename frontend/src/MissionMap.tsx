@@ -5,6 +5,7 @@ const PX = 3.5 // canvas pixels per cell
 const SIZE = Math.round(GRID * PX)
 const SENSOR_RANGE_CELLS = 8 / 0.25
 const SENSOR_FOV_DEG = 45
+const Z_EXAG = 5 // relief exaggeration for the hillshade only
 
 // soil, bedrock, sand, big rock
 const CLASS_RGB: [number, number, number][] = [
@@ -28,8 +29,8 @@ function hillshade(elev: number[][]): HTMLCanvasElement {
     for (let col = 0; col < GRID; col++) {
       const r0 = Math.max(r - 1, 0), r1 = Math.min(r + 1, GRID - 1)
       const c0 = Math.max(col - 1, 0), c1 = Math.min(col + 1, GRID - 1)
-      const dzdx = ((elev[r][c1] - elev[r][c0]) / ((c1 - c0) * 0.25)) * 1
-      const dzdy = ((elev[r1][col] - elev[r0][col]) / ((r1 - r0) * 0.25)) * 1
+      const dzdx = ((elev[r][c1] - elev[r][c0]) / ((c1 - c0) * 0.25)) * Z_EXAG
+      const dzdy = ((elev[r1][col] - elev[r0][col]) / ((r1 - r0) * 0.25)) * Z_EXAG
       const slope = Math.atan(Math.hypot(dzdx, dzdy))
       const aspect = Math.atan2(dzdy, -dzdx)
       let shade = Math.cos(alt) * Math.cos(slope) + Math.sin(alt) * Math.sin(slope) * Math.cos(az - aspect)
@@ -54,7 +55,7 @@ export function MissionMap() {
     c.width = c.height = GRID
     return c
   }, [])
-  const { last, trail, cls, unc, blocked, truth, world, layers, beliefVersion, setTarget } = useMission()
+  const { last, trail, cls, unc, blocked, truth, world, layers, beliefVersion, setTarget, pendingTarget } = useMission()
   const shade = useMemo(() => (world ? hillshade(world.elevation) : null), [world])
   const [hover, setHover] = useState<[number, number] | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -130,6 +131,18 @@ export function MissionMap() {
       ctx.moveTo(cx(gx), cx(gy) - 12); ctx.lineTo(cx(gx), cx(gy) + 12); ctx.stroke()
     }
 
+    if (pendingTarget && !(last?.goal && last.goal[0] === pendingTarget[0] && last.goal[1] === pendingTarget[1])) {
+      const [px, py] = pendingTarget
+      ctx.strokeStyle = 'rgba(56,189,248,0.9)'
+      ctx.setLineDash([3, 3])
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.arc(cx(px), cx(py), 9, 0, Math.PI * 2); ctx.stroke()
+      ctx.setLineDash([])
+      ctx.fillStyle = 'rgba(56,189,248,0.95)'
+      ctx.font = '11px ui-monospace, monospace'
+      ctx.fillText('uplink…', cx(px) + 12, cx(py) + 4)
+    }
+
     if (last && layers.rover) {
       const x = cx(last.pose.x), y = cx(last.pose.y)
       const h = ((last.pose.heading - 90) * Math.PI) / 180 // canvas 0 = east; heading 0 = north
@@ -155,7 +168,7 @@ export function MissionMap() {
       ctx.font = 'bold 13px ui-monospace, monospace'
       ctx.fillText('TRUTH', 22, 24)
     }
-  }, [last, trail, cls, unc, blocked, truth, layers, shade, overlay, beliefVersion])
+  }, [last, trail, cls, unc, blocked, truth, layers, shade, overlay, beliefVersion, pendingTarget])
 
   const toCell = (e: React.MouseEvent<HTMLCanvasElement>): [number, number] => {
     const rect = e.currentTarget.getBoundingClientRect()

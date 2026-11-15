@@ -352,7 +352,6 @@ class Rover:
     # ------------------------------------------------------------------ main loop
     def step(self) -> list[Event]:
         """Advance one fixed tick. Returns the events emitted during this tick."""
-        self._events = []
         self._entered_new_tile = False
         self.mission_time += TICK_S
         self.seq += 1
@@ -376,7 +375,8 @@ class Rover:
             # else: stay SCANNING and retry next tick
         elif s == State.DRIVING:
             self._drive_tick()
-        return list(self._events)
+        out, self._events = self._events, []
+        return out
 
     _pending_reason = "replan"
 

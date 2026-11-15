@@ -1,13 +1,27 @@
 # Python
 .venv/
+venv/
+.tox/
+.nox/
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 *.egg-info/
 
 # Node
 node_modules/
-frontend/dist/
+dist/
+dist-ssr/
+build/
+coverage/
+.vite/
+*.tsbuildinfo
 
 # Data and artifacts (commit only small crops and cached JSON)
 *.pt
@@ -16,15 +30,38 @@ frontend/dist/
 *.sqlite
 *.db
 artifacts/
+rr-artifacts/
 ml/runs/
 ml/checkpoints/
 !ml/weights/*.pt
 data/
 *.zip
 
+# Local logs and scratch files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+.tmp/
+tmp/
+temp/
+.worktrees/
+/wt/
+
 # Editors / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+Desktop.ini
 .env
+.env.*
+!.env.example
+!.env.sample

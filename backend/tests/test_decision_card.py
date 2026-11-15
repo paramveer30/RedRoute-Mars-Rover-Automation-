@@ -93,3 +93,14 @@ def test_no_shortest_path(scene):
 
 def test_path_length():
     assert path_length_m([(0, 0), (0, 1), (1, 2)]) == pytest.approx(0.25 + 0.25 * math.sqrt(2))
+
+
+def test_sand_band_real_planner(scene):
+    from backend.app.planner import plan
+    world, belief, cfg = scene
+    chosen = plan(*cost_grid(world, belief, cfg), START, GOAL)
+    card = decision_card(world, belief, cfg, START, GOAL, chosen)  # default planner = real A*
+    assert card["avoided"]["class"] == "sand"
+    assert card["avoided"]["cells"] > 0
+    assert card["extra_m"] > 0
+    json.dumps(card)

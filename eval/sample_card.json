@@ -1,0 +1,77 @@
+{
+ "seed": 1,
+ "mode": "model",
+ "start": [
+  190,
+  10
+ ],
+ "goal": [
+  10,
+  120
+ ],
+ "final_state": "IDLE",
+ "hazard_entries": 2,
+ "replans": 1,
+ "frame_image_id": "m3_0046",
+ "initial_route": {
+  "pose": [
+   190,
+   10
+  ],
+  "known_cells": 446,
+  "card": {
+   "chosen_len_m": 56.391,
+   "shortest_len_m": 56.391,
+   "extra_m": 0.0,
+   "extra_pct": 0.0,
+   "avoided": {
+    "class": null,
+    "cells": 0,
+    "mean_p": 0.0,
+    "mean_conf": 0.0
+   },
+   "chosen_max_unc": 0.5,
+   "summary": "Chosen route matches the shortest route; nothing needed avoiding."
+  }
+ },
+ "final_route": {
+  "pose": [
+   121,
+   58
+  ],
+  "known_cells": 2684,
+  "card": {
+   "chosen_len_m": 34.17,
+   "shortest_len_m": 34.17,
+   "extra_m": 0.0,
+   "extra_pct": 0.0,
+   "avoided": {
+    "class": null,
+    "cells": 0,
+    "mean_p": 0.0,
+    "mean_conf": 0.0
+   },
+   "chosen_max_unc": 0.5,
+   "summary": "Chosen route matches the shortest route; nothing needed avoiding."
+  }
+ },
+ "route_versions": 2,
+ "full_trajectory": {
+  "note": "driven trajectory vs geometry-only shortest on the final belief",
+  "known_cells": 5872,
+  "card": {
+   "chosen_len_m": 55.684,
+   "shortest_len_m": 56.391,
+   "extra_m": -0.707,
+   "extra_pct": -1.25,
+   "avoided": {
+    "class": null,
+    "cells": 0,
+    "mean_p": 0.0,
+    "mean_conf": 0.0
+   },
+   "chosen_max_unc": 0.44936272501945496,
+   "summary": "Chosen route matches the shortest route; nothing needed avoiding."
+  }
+ }
+}

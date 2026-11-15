@@ -71,10 +71,13 @@ def decision_card(world: World, belief: Belief, cfg: CostConfig, start: Cell, go
     shortest = [(int(c[0]), int(c[1])) for c in shortest]
     shortest_len = path_length_m(shortest)
     extra_m = chosen_len - shortest_len
+    if abs(extra_m) < 1e-6:
+        extra_m = 0.0  # avoid -0.0
     extra_pct = 100.0 * extra_m / shortest_len if shortest_len > 0 else 0.0
 
     on_chosen = set(chosen)
-    cells = [c for c in dict.fromkeys(shortest) if c not in on_chosen and belief.known[c]]
+    cells = [] if extra_m < 0.05 else [
+        c for c in dict.fromkeys(shortest) if c not in on_chosen and belief.known[c]]
     if cells:
         rr = np.array([c[0] for c in cells])
         cc = np.array([c[1] for c in cells])

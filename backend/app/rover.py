@@ -384,7 +384,10 @@ class Rover:
         if self._dist_to_goal_m() <= ARRIVE_M:
             self._arrive()
             return
-        reason = self._replan_reason() or self._cheaper_route_reason()
+        if self.path_idx >= len(self.path) - 1:
+            reason = "end of path short of goal"
+        else:
+            reason = self._replan_reason() or self._cheaper_route_reason()
         if reason:
             self._pending_reason = reason
             self._emit("warn", "replan_trigger", f"Replanning: {reason}")

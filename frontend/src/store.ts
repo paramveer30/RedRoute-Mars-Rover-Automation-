@@ -50,7 +50,11 @@ const emptyBuffers = () => ({
   blocked: new Uint8Array(GRID * GRID),
 })
 
+let worldLoading: number | null = null
+
 async function loadWorld(seed: number, set: (p: Partial<MissionStore>) => void) {
+  if (worldLoading === seed) return // ticks arrive faster than the 1.5 MB world loads
+  worldLoading = seed
   const [w, t] = await Promise.all([
     fetch(`/api/world/${seed}`).then((r) => r.json() as Promise<WorldLayers>),
     fetch(`/api/world/${seed}/truth`).then((r) => r.json() as Promise<{ truth: string }>),

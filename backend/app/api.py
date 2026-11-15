@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import logging
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Literal
@@ -24,6 +25,7 @@ from world.builder import build_world
 from .contracts import GRID, CostConfig, World
 from .rover import TICK_S, Rover
 
+log = logging.getLogger("redroute")
 app = FastAPI(title="RedRoute")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -122,14 +124,21 @@ async def _broadcast(m: Mission, payload: dict) -> None:
 
 async def _run(m: Mission) -> None:
     loop = asyncio.get_running_loop()
-    while m.subscribers:
-        t0 = loop.time()
-        async with m.lock:
-            events = await asyncio.to_thread(m.rover.step)
-            payload = m.tick_payload(events)
-        await _broadcast(m, payload)
-        await asyncio.sleep(max(0.0, TICK_S - (loop.time() - t0)))
-    m.task = None
+    try:
+        while m.subscribers:
+            t0 = loop.time()
+            async with m.lock:
+                try:
+                    events = await asyncio.to_thread(m.rover.step)
+                except Exception as exc:  # never let one bad tick kill the mission loop
+                    log.exception("rover step failed")
+                    m.rover.safe_stop(f"internal error: {exc}")
+                    events = m.rover._events
+                payload = m.tick_payload(events)
+            await _broadcast(m, payload)
+            await asyncio.sleep(max(0.0, TICK_S - (loop.time() - t0)))
+    finally:
+        m.task = None
 
 
 @app.websocket("/ws/missions/{mission_id}")

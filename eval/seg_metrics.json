@@ -1,0 +1,128 @@
+{
+  "split": "test_min3",
+  "n_images": 322,
+  "input_size": 256,
+  "miou": 0.7999082031007398,
+  "iou": {
+    "soil": 0.9774243344292587,
+    "bedrock": 0.9349737820432841,
+    "sand": 0.9597742038105851,
+    "big_rock": 0.32746049211983164
+  },
+  "pixel_acc": 0.9805401988130217,
+  "class_share": {
+    "soil": 0.5135001233249628,
+    "bedrock": 0.2239103889268314,
+    "sand": 0.2619252862472274,
+    "big_rock": 0.0006642015009784487
+  },
+  "class_pixels": {
+    "soil": 60069019,
+    "bedrock": 26192939,
+    "sand": 30639905,
+    "big_rock": 77698
+  },
+  "labelled_pixels": 116979561,
+  "confusion_matrix": [
+    [
+      59202416,
+      402764,
+      463839,
+      0
+    ],
+    [
+      471857,
+      25523350,
+      50369,
+      147363
+    ],
+    [
+      27728,
+      702763,
+      29900914,
+      8500
+    ],
+    [
+      1216,
+      0,
+      0,
+      76482
+    ]
+  ],
+  "val_miou": 0.795784142773999,
+  "val_iou": {
+    "soil": 0.9240537098338,
+    "bedrock": 0.9374757853847976,
+    "sand": 0.8745803886579698,
+    "big_rock": 0.44702668721942873
+  },
+  "val_pixel_acc": 0.9588331302708606,
+  "val_n_images": 500,
+  "val_fingerprint": "1629574715e18097",
+  "val_input_resolution_miou": 0.79553233644434,
+  "val_input_resolution_iou": {
+    "soil": 0.923976430131933,
+    "bedrock": 0.9373363752915761,
+    "sand": 0.8743048783646812,
+    "big_rock": 0.4465116619891697
+  },
+  "native_evaluation": {
+    "logit_resize": "bilinear",
+    "align_corners": false,
+    "argmax_after_resize": true,
+    "ignored_label": 255
+  },
+  "cpu_latency_ms": {
+    "p50": 71.27964997198433,
+    "p95": 116.00226000591645,
+    "n_images": 50,
+    "warmup_images": 5,
+    "batch_size": 1,
+    "threads": 4,
+    "precision": "float32",
+    "includes": "model forward only",
+    "excludes": [
+      "dataset decoding",
+      "preprocess",
+      "model loading"
+    ]
+  },
+  "gpu_imgs_per_s": 259.3356161795858,
+  "gpu_benchmark": {
+    "batch_size": 16,
+    "warmup_batches": 5,
+    "measured_batches": 20,
+    "precision": "float32",
+    "includes": "resident model forward only",
+    "device": "NVIDIA GeForce RTX 5060 Laptop GPU"
+  },
+  "weights": "ml/weights/unet_r34_fp16.pt",
+  "weights_sha256": "a7c5272b640bdf5f133eec6b36cc02518dc896da2d31631084edfebf141cd20e",
+  "weights_bytes": 49007035,
+  "source_git_sha": "7d05496ecff32ece21b24f2020ee20c9eac97f8c",
+  "wall_seconds": 43.299240300024394,
+  "notes": [
+    "Frozen A01 checkpoint; no training or model selection on test_min3.",
+    "Native test/val metrics use cleaned full-resolution labels and bilinearly resized logits.",
+    "A01 checkpoint-selection validation used nearest-resized 256px labels and AMP; val_input_resolution metrics here use FP32 deployment inference.",
+    "Encoded image SHA256 audit found no overlap between the 6500-row subset and 322 test images; differently encoded duplicates are not ruled out."
+  ],
+  "source_image_overlap_audit": {
+    "method": "SHA256 of encoded source image bytes via shared loaders; Image(decode=False)",
+    "subset_rows": 6500,
+    "subset_unique_images": 6499,
+    "test_rows": 322,
+    "test_unique_images": 322,
+    "subset_test_overlap_unique_images": 0,
+    "test_rows_overlapping_subset": 0,
+    "training6000_test_overlap_unique_images": 0,
+    "validation500_test_overlap_unique_images": 0,
+    "training_validation_overlap_unique_images": 0,
+    "limitation": "Different encodings of identical pixels are not detected by this encoded-byte audit."
+  },
+  "validation_membership_verification": {
+    "images_and_labels_matched_a01_cache_in_order": 500,
+    "method": "Exact RGB area-resized images and cleaned nearest-resized labels at INPUT_SIZE.",
+    "note": "HF save/load fingerprints are not stable row identities; actual validation content matched."
+  }
+}

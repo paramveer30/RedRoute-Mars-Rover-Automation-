@@ -67,8 +67,8 @@ def temperature() -> float:
     return _read_temperature(str(path), stat.st_mtime_ns, stat.st_size)
 
 
-def predict_tile(tile_id: str, blur: float = 0.0, noise: float = 0.0) -> np.ndarray:
-    """Return (20,20,4) float32 probabilities for one source image on CPU.
+def predict_image(tile_id: str, blur: float = 0.0, noise: float = 0.0) -> np.ndarray:
+    """Return model-resolution (INPUT_SIZE, INPUT_SIZE, 4) probabilities on CPU.
 
     blur/noise are severities in [0,1]: source-image Gaussian sigma is up to
     8 pixels; noise sigma up to 40 grayscale levels. First-call model/data
@@ -93,4 +93,10 @@ def predict_tile(tile_id: str, blur: float = 0.0, noise: float = 0.0) -> np.ndar
     with torch.inference_mode():
         logits = model(tensor)
         probs = torch.softmax(logits.float() / temperature(), dim=1)
-    return warp_probs(probs[0].permute(1, 2, 0).numpy(), _homographies()[tile_id])
+    return probs[0].permute(1, 2, 0).numpy()
+
+
+def predict_tile(tile_id: str, blur: float = 0.0, noise: float = 0.0) -> np.ndarray:
+    """Return (20,20,4) float32 probabilities for one source image on CPU."""
+    probs = predict_image(tile_id, blur=blur, noise=noise)
+    return warp_probs(probs, _homographies()[tile_id])

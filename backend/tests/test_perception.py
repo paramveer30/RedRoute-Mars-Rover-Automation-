@@ -287,9 +287,14 @@ def test_real_cpu_live_prediction_latency(real_demo_predictions):
     assert median < 1000
 
 
-def test_real_demo_blur_uncertainty_increase(real_demo_predictions, monkeypatch):
-    # This fixed first demo seed/start was selected before measuring entropy.
-    # Keep failures visible: blur is not guaranteed to increase model entropy.
+def test_real_demo_blur_fresh_belief_contract(real_demo_predictions, monkeypatch):
+    # A single blurred frame on a fresh belief is NOT guaranteed to raise U.
+    # Measured over all 149 usable tiles (ml/blur_study.py, eval/blur_study.json):
+    # blur=0.8 raises per-tile cell U on only 62% (T=1.0) / 64% (T=1.52) of
+    # tiles, while label accuracy falls 0.97 -> 0.66; the model mostly becomes
+    # confidently wrong. This fixed demo start is one where U falls, so only
+    # the belief contract is asserted here; the rover-sequence test below
+    # carries the blur acceptance criterion.
     world, pose, sensor, cone, clear_predictions = real_demo_predictions
     monkeypatch.setattr(perception, "_predictions", lambda: clear_predictions)
     clear, blurred = Belief.empty(), Belief.empty()
@@ -299,13 +304,26 @@ def test_real_demo_blur_uncertainty_increase(real_demo_predictions, monkeypatch)
     np.testing.assert_array_equal(blurred.known, cone)
     np.testing.assert_allclose(blurred.probs.sum(axis=-1), 1, atol=1e-6)
     assert ((blurred.unc >= 0) & (blurred.unc <= 1)).all()
-    clear_u = float(clear.unc[cone].mean())
-    blur_u = float(blurred.unc[cone].mean())
-    print(f"fixed seed=1 pose=(190,10,0) mean U clear={clear_u:.8f} blur={blur_u:.8f}")
-    if blur_u <= clear_u:
-        pytest.xfail(f"measured blur entropy does not rise at fixed demo start: {clear_u:.8f} -> {blur_u:.8f}")
-    assert blur_u > clear_u
+    changed = float((blurred.probs[cone].argmax(-1) != clear.probs[cone].argmax(-1)).mean())
+    print(f"fixed seed=1 pose=(190,10,0) mean U clear={clear.unc[cone].mean():.8f} "
+          f"blur={blurred.unc[cone].mean():.8f} argmax changed={changed:.3f}")
+    assert changed > 0  # blur reaches the model: predictions actually differ
 
+
+def test_real_rover_sequence_blur_raises_fused_uncertainty(real_demo_predictions):
+    # Blur acceptance: the rover drives north on seeds 1-3, 6 clear ticks then
+    # 4 ticks with blur=0.8, versus the same 10 poses all clear. Clear and blur
+    # frames both come from live CPU inference at the same temperature, so a
+    # cache built at another T cannot fake the effect. Measured on seeds 1-20
+    # (96 tiles): fused U rises on 81% (T=1.0) / 77% (T=1.52) of blurred tiles;
+    # on seeds 1-3 it rises on 13/15 tiles at both temperatures. Require two
+    # thirds, which also holds on the 20-seed population at both temperatures.
+    from ml.blur_study import rover_study
+    result = rover_study(seeds=(1, 2, 3))
+    print({key: value for key, value in result.items() if key != "tiles"})
+    assert result["n_tiles"] >= 10
+    assert result["frac_u_up"] >= 2 / 3
+    assert result["mean_u_blur_phase"] > result["mean_u_clear"]
 
 
 def test_published_cache_matches_live_cpu_predictions(real_demo_predictions):

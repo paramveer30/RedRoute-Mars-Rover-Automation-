@@ -6,7 +6,7 @@
 
 **Do not edit without Stream A:** `backend/app/contracts.py`. A owns `perception.py`, `mapping.py`, `world/`, `ml/`, `eval/`.
 
-**Branch:** `stream-b`. Merge to `main` at every sync point (hours 6, 12, 16, 20).
+**Git:** everyone works directly on `main`, no branches. Pull before you start, commit small, push often. Stick to your own files to avoid conflicts.
 
 ---
 
@@ -38,7 +38,7 @@ cd frontend && npm run dev        # open http://localhost:5173
 ## Hour-by-hour
 
 ### Hour 0 to 1: contract and hello tick
-- [ ] 30 min contract meeting with A. Lock `contracts.py`, the WebSocket schema (`frontend/src/types.ts` mirrors it), and branch names.
+- [ ] 30 min contract meeting with A. Lock `contracts.py` and the WebSocket schema (`frontend/src/types.ts` mirrors it).
 - [ ] Run both servers and confirm the browser shows ticks and a moving yellow dot. **Done:** this already works from setup, so move straight on.
 
 ### Hour 1 to 4: A*, simulator, state machine

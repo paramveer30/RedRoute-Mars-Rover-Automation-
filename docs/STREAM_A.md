@@ -6,7 +6,7 @@
 
 **Do not edit without Stream B:** `backend/app/contracts.py`. Stream B owns `planner.py`, `rover.py`, `link.py`, `faults.py`, `api.py`.
 
-**Branch:** `stream-a`. Merge to `main` at every sync point (hours 6, 12, 16, 20).
+**Git:** everyone works directly on `main`, no branches. Pull before you start, commit small, push often. Stick to your own files to avoid conflicts.
 
 ---
 

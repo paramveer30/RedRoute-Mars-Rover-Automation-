@@ -10,8 +10,8 @@
   120
  ],
  "final_state": "IDLE",
- "hazard_entries": 2,
- "replans": 1,
+ "hazard_entries": 0,
+ "replans": 7,
  "frame_image_id": "m3_0046",
  "initial_route": {
   "pose": [
@@ -36,13 +36,13 @@
  },
  "final_route": {
   "pose": [
-   121,
-   58
+   87,
+   66
   ],
-  "known_cells": 2684,
+  "known_cells": 4058,
   "card": {
-   "chosen_len_m": 34.17,
-   "shortest_len_m": 34.17,
+   "chosen_len_m": 24.842,
+   "shortest_len_m": 24.842,
    "extra_m": 0.0,
    "extra_pct": 0.0,
    "avoided": {
@@ -55,23 +55,23 @@
    "summary": "Chosen route matches the shortest route; nothing needed avoiding."
   }
  },
- "route_versions": 2,
+ "route_versions": 8,
  "full_trajectory": {
   "note": "driven trajectory vs geometry-only shortest on the final belief",
-  "known_cells": 5872,
+  "known_cells": 6422,
   "card": {
-   "chosen_len_m": 55.684,
+   "chosen_len_m": 57.123,
    "shortest_len_m": 56.391,
-   "extra_m": -0.707,
-   "extra_pct": -1.25,
+   "extra_m": 0.732,
+   "extra_pct": 1.3,
    "avoided": {
-    "class": null,
-    "cells": 0,
-    "mean_p": 0.0,
-    "mean_conf": 0.0
+    "class": "sand",
+    "cells": 8,
+    "mean_p": 0.9701942801475525,
+    "mean_conf": 0.9121843576431274
    },
-   "chosen_max_unc": 0.44936272501945496,
-   "summary": "Chosen route matches the shortest route; nothing needed avoiding."
+   "chosen_max_unc": 0.08378711342811584,
+   "summary": "Took a 0.7 m (1%) longer route to avoid 8 cells of predicted sand (mean P=0.97)."
   }
  }
 }
